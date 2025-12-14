@@ -197,7 +197,7 @@ class BaiscopeScraperAdvanced:
         except Exception as e:
             logger.error(f"Error saving state: {e}")
     
-    def get_page(self, url, retries=3):
+    def get_page(self, url, retries=4):
         for attempt in range(retries):
             try:
                 browser = random.choice(self.browser_versions)
@@ -213,18 +213,29 @@ class BaiscopeScraperAdvanced:
                         'Accept-Encoding': 'gzip, deflate, br',
                         'DNT': '1',
                         'Connection': 'keep-alive',
-                        'Upgrade-Insecure-Requests': '1'
+                        'Upgrade-Insecure-Requests': '1',
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
                     }
                 )
                 response.raise_for_status()
                 
-                time.sleep(random.uniform(0.5, 1.5))
+                time.sleep(random.uniform(1.5, 3.0))
                 return response
             except Exception as e:
-                logger.warning(f"Attempt {attempt + 1} failed: {e}")
-                if attempt < retries - 1:
-                    time.sleep(random.uniform(5, 10))
+                error_str = str(e)
+                is_403 = '403' in error_str
+                
+                if is_403:
+                    backoff_time = random.uniform(3, 6) * (attempt + 1)
+                    logger.warning(f"403 Blocked! Attempt {attempt + 1} - backing off for {backoff_time:.1f}s")
+                    time.sleep(backoff_time)
                 else:
+                    logger.warning(f"Attempt {attempt + 1} failed: {e}")
+                    if attempt < retries - 1:
+                        time.sleep(random.uniform(5, 10))
+                
+                if attempt == retries - 1:
                     logger.error(f"Failed to fetch {url} after {retries} attempts")
                     return None
     
@@ -432,7 +443,7 @@ class BaiscopeScraperAdvanced:
             logger.error(f"Error processing subtitle: {e}")
             return False
     
-    def scrape_all(self, limit=None, workers=5):
+    def scrape_all(self, limit=None, workers=3):
         logger.info("Starting Baiscope.lk subtitle scraper with curl_cffi browser impersonation...")
         logger.info(f"Using {workers} parallel workers, batch size: {self.batch_size}")
         logger.info(f"Previously processed URLs: {len(self.processed_urls)}")
