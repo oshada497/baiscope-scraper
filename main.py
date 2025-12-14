@@ -109,7 +109,7 @@ class BaiscopeScraperAdvanced:
         """Get all subtitle listing pages"""
         subtitle_urls = []
         page = 1
-        max_pages = 50  # Limit pages for safety
+        max_pages = 2000  # Increased to handle 20,000+ subtitles (roughly 10-15 per page)
         
         while page <= max_pages:
             # The site uses /subtitles/ as main listing page
@@ -346,5 +346,5 @@ if __name__ == '__main__':
         r2_bucket_name=R2_BUCKET_NAME
     )
     
-    # Scrape with limit for testing (set to None for full scrape)
-    scraper.scrape_all(limit=5)
+    # Full scrape - no limit for production
+    scraper.scrape_all()
