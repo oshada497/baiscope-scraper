@@ -9,5 +9,11 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         value: "-1003442794989"
+      - key: CF_ACCOUNT_ID
+        sync: false
+      - key: CF_API_TOKEN
+        sync: false
+      - key: D1_DATABASE_ID
+        sync: false
       - key: BATCH_SIZE
         value: "50"

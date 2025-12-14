@@ -27,10 +27,17 @@ def run_scraper():
     TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '-1003442794989')
     
+    CF_ACCOUNT_ID = os.environ.get('CF_ACCOUNT_ID') or os.environ.get('CLOUDFLARE_ACCOUNT_ID')
+    CF_API_TOKEN = os.environ.get('CF_API_TOKEN') or os.environ.get('CLOUDFLARE_API_TOKEN')
+    D1_DATABASE_ID = os.environ.get('D1_DATABASE_ID')
+    
     if not TELEGRAM_BOT_TOKEN:
         logger.error("Missing TELEGRAM_BOT_TOKEN!")
         scraper_status['status'] = 'error: missing telegram token'
         return
+    
+    if not all([CF_ACCOUNT_ID, CF_API_TOKEN, D1_DATABASE_ID]):
+        logger.warning("D1 database credentials not set - using local file storage")
     
     BATCH_SIZE = int(os.environ.get('BATCH_SIZE', 50))
     
@@ -40,6 +47,9 @@ def run_scraper():
     current_scraper = BaiscopeScraperTelegram(
         telegram_token=TELEGRAM_BOT_TOKEN,
         telegram_chat_id=TELEGRAM_CHAT_ID,
+        cf_account_id=CF_ACCOUNT_ID,
+        cf_api_token=CF_API_TOKEN,
+        d1_database_id=D1_DATABASE_ID,
         batch_size=BATCH_SIZE
     )
     
@@ -69,7 +79,7 @@ start_scraper_if_needed()
 
 @app.route('/')
 def health():
-    return 'Baiscope Subtitle Scraper - Telegram Storage Mode', 200
+    return 'Baiscope Subtitle Scraper - Telegram + D1 Storage Mode', 200
 
 @app.route('/status')
 def status():
@@ -79,11 +89,16 @@ def status():
         'status': scraper_status['status'],
         'start_time': scraper_status['start_time'],
         'total_processed': scraper_status['processed_urls'],
-        'storage': 'telegram'
+        'storage': 'telegram + d1'
     }
     
     if current_scraper:
         response['total_processed'] = len(current_scraper.processed_urls)
+        
+        if current_scraper.d1.enabled:
+            response['d1_discovered'] = current_scraper.d1.get_discovered_urls_count()
+            response['d1_processed'] = current_scraper.d1.get_processed_urls_count()
+        
         if hasattr(current_scraper, 'tracker'):
             tracker = current_scraper.tracker
             response['current_progress'] = {
