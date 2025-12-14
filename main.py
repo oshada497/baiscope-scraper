@@ -173,6 +173,7 @@ class BaiscopeScraperAdvanced:
         subtitle_urls = []
         page = 1
         max_pages = 2000
+        consecutive_empty = 0
         
         while page <= max_pages:
             if page == 1:
@@ -184,7 +185,11 @@ class BaiscopeScraperAdvanced:
             response = self.get_page(url)
             
             if not response:
-                break
+                consecutive_empty += 1
+                if consecutive_empty >= 3:
+                    break
+                page += 1
+                continue
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
@@ -193,26 +198,21 @@ class BaiscopeScraperAdvanced:
             
             for link in all_links:
                 href = link.get('href', '')
-                if '-sinhala-subtitles' in href and '/category/' not in href:
+                if ('-sinhala-subtitles' in href or '-sinhala-subtitle' in href) and '/category/' not in href and '/tag/' not in href:
                     full_url = href if href.startswith('http') else urljoin(self.base_url, href)
-                    if full_url not in subtitle_urls:
+                    if full_url not in subtitle_urls and 'baiscope.lk' in full_url:
                         subtitle_urls.append(full_url)
                         found_on_page += 1
             
-            logger.info(f"Found {found_on_page} unique subtitle links on page {page}")
+            logger.info(f"Found {found_on_page} unique subtitle links on page {page} (Total: {len(subtitle_urls)})")
             
             if found_on_page == 0:
-                logger.warning(f"No subtitle links found on page {page}")
-                break
-            
-            next_page_url = f"{self.base_url}/subtitles/page/{page + 1}/"
-            next_btn = soup.find('a', href=next_page_url)
-            if not next_btn:
-                next_btn = soup.find('a', class_='next')
-            
-            if not next_btn:
-                logger.info("No more pages found")
-                break
+                consecutive_empty += 1
+                if consecutive_empty >= 3:
+                    logger.info(f"3 consecutive empty pages, stopping at page {page}")
+                    break
+            else:
+                consecutive_empty = 0
             
             page += 1
             
