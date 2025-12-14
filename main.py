@@ -501,7 +501,7 @@ class BaiscopeScraperTelegram:
                 response.raise_for_status()
                 
                 self.consecutive_403s = 0
-                time.sleep(random.uniform(2.0, 4.0))
+                time.sleep(random.uniform(0.5, 1.5))
                 return response
                 
             except Exception as e:
@@ -639,7 +639,7 @@ class BaiscopeScraperTelegram:
                             message_id=file_info.get('message_id', 0)
                         )
                     
-                    time.sleep(random.uniform(0.5, 1.5))
+                    time.sleep(random.uniform(0.2, 0.5))
             
             logger.info(f"Uploaded {success_count}/{len(srt_files)} SRT files to Telegram")
             return success_count > 0, title_text
@@ -693,7 +693,7 @@ class BaiscopeScraperTelegram:
                 else:
                     self.tracker.update(success=False)
                 
-                time.sleep(random.uniform(1.0, 2.5))
+                time.sleep(random.uniform(0.3, 0.8))
                 
             except Exception as e:
                 logger.error(f"Error processing {url}: {e}")
