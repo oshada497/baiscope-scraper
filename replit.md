@@ -63,8 +63,31 @@ telegram_files (id, file_id, file_unique_id, filename, file_size, title, source_
 - Repository: github.com/oshada497/baiscope-scraper
 - Push changes: `git add -A && git commit -m "message" && git push`
 
+## Filename Matching Logic
+The scraper uses intelligent filename normalization to match files between Telegram channel (2000+ existing SRT files) and Baiscope website:
+
+**Handled Patterns:**
+- `(@SinhalaSubtitles_Rezoth) MovieName.srt` - Parenthesized watermark
+- `@SinhalaSubtitles_Rezoth_MovieName.srt` - Underscore prefix watermark
+- Generic `@username_` or `(@username)` patterns
+
+**Normalization Process:**
+1. Strip watermark patterns (e.g., `@SinhalaSubtitles_Rezoth`)
+2. Convert to lowercase
+3. Remove file extension
+4. Remove all special characters (keep only alphanumerics + Sinhala chars)
+
+**Example Matches:**
+- `(@SinhalaSubtitles_Rezoth) Morbius-2022-Sinhala.srt` → `morbius2022sinhala`
+- `Morbius-2022-Sinhala.srt` → `morbius2022sinhala` (MATCH!)
+
+**Helper Functions:**
+- `normalize_filename()` - Core normalization for exact matching
+- `extract_movie_info()` - Extracts movie name, year, season/episode for fuzzy matching
+
 ## Notes
 - Replit is used for code editing and pushing to GitHub only
 - Scraper runs on Render, not on Replit
 - Some 403 errors are expected due to Cloudflare - scraper handles them with backoff
 - Telegram file IDs stored in D1 can be used to forward/resend files without re-uploading
+- Files are skipped if normalized filename already exists in D1 database (prevents duplicates)

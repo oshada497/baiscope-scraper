@@ -16,12 +16,79 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def normalize_filename(filename):
+    """
+    Normalize filename for matching - strips watermarks like (@SinhalaSubtitles_Rezoth) 
+    and other common patterns before normalizing for comparison.
+    """
     if not filename:
         return ""
-    name = filename.lower()
+    name = filename
+    
+    # Remove common Telegram channel watermark patterns
+    # Patterns like: (@SinhalaSubtitles_Rezoth), @SinhalaSubtitles_Rezoth_, etc.
+    watermark_patterns = [
+        r'\(@[^)]+\)\s*',           # (@SinhalaSubtitles_Rezoth) with optional space
+        r'@SinhalaSubtitles[_\-]?Rezoth[_\-]?\s*',  # @SinhalaSubtitles_Rezoth or variations
+        r'@[A-Za-z0-9_]+[_\-]\s*',  # Generic @username_ pattern at start
+        r'\s*\(@[^)]+\)',           # (@watermark) at end
+        r'^\s*@[A-Za-z0-9_]+\s+',   # @username at start with space
+    ]
+    
+    for pattern in watermark_patterns:
+        name = re.sub(pattern, '', name, flags=re.IGNORECASE)
+    
+    # Convert to lowercase
+    name = name.lower()
+    
+    # Remove file extension
     name = re.sub(r'\.[^.]+$', '', name)
+    
+    # Remove all special characters except alphanumerics and Sinhala characters
     name = re.sub(r'[^a-z0-9\u0D80-\u0DFF]', '', name)
+    
     return name
+
+
+def extract_movie_info(filename):
+    """
+    Extract movie/show name, year, and episode info for fuzzy matching.
+    Returns (base_name, year, season, episode) tuple.
+    """
+    if not filename:
+        return ("", None, None, None)
+    
+    # First normalize the filename to remove watermarks
+    name = filename
+    watermark_patterns = [
+        r'\(@[^)]+\)\s*',
+        r'@SinhalaSubtitles[_\-]?Rezoth[_\-]?\s*',
+        r'@[A-Za-z0-9_]+[_\-]\s*',
+        r'\s*\(@[^)]+\)',
+        r'^\s*@[A-Za-z0-9_]+\s+',
+    ]
+    for pattern in watermark_patterns:
+        name = re.sub(pattern, '', name, flags=re.IGNORECASE)
+    
+    # Remove extension
+    name = re.sub(r'\.[^.]+$', '', name)
+    
+    # Extract year (4 digits that look like a year)
+    year_match = re.search(r'[\.\-_\s\(]?(19[89]\d|20[0-2]\d)[\.\-_\s\)]?', name)
+    year = year_match.group(1) if year_match else None
+    
+    # Extract season and episode (S01E01 or similar patterns)
+    episode_match = re.search(r'[Ss](\d{1,2})[Ee](\d{1,2})', name)
+    season = episode_match.group(1) if episode_match else None
+    episode = episode_match.group(2) if episode_match else None
+    
+    # Get the base name (before year or episode info)
+    base_name = name.lower()
+    # Remove year and episode info for base comparison
+    base_name = re.sub(r'[\.\-_\s\(]?(19[89]\d|20[0-2]\d)[\.\-_\s\)]?.*', '', base_name)
+    base_name = re.sub(r'[Ss]\d{1,2}[Ee]\d{1,2}.*', '', base_name)
+    base_name = re.sub(r'[^a-z0-9\u0D80-\u0DFF]', '', base_name)
+    
+    return (base_name, year, season, episode)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
