@@ -159,7 +159,7 @@ class BaiscopeScraperAdvanced:
                 )
                 response.raise_for_status()
                 
-                time.sleep(random.uniform(2, 5))
+                time.sleep(random.uniform(0.5, 1.5))
                 return response
             except Exception as e:
                 logger.warning(f"Attempt {attempt + 1} failed: {e}")
@@ -216,7 +216,7 @@ class BaiscopeScraperAdvanced:
             
             page += 1
             
-            time.sleep(random.uniform(3, 6))
+            time.sleep(random.uniform(1, 2))
         
         logger.info(f"Total subtitle pages found: {len(subtitle_urls)}")
         return subtitle_urls
@@ -362,7 +362,7 @@ class BaiscopeScraperAdvanced:
                 success_count += 1
             self.tracker.update(success=success)
             
-            time.sleep(random.uniform(4, 8))
+            time.sleep(random.uniform(1, 2))
         
         if len(subtitle_urls) > 0:
             self.tracker.stop()
