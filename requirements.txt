@@ -6,3 +6,4 @@ gunicorn>=21.0.0
 flask
 gunicorn
 telethon
+telethon
