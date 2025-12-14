@@ -21,20 +21,32 @@ A Python scraper that downloads Sinhala subtitles from baiscope.lk and uploads t
 - **Graceful Shutdown** - Saves state when receiving SIGTERM/SIGINT signals
 
 ## Files
-- `main.py` - Main scraper with BaiscopeScraperTelegram class
+- `main.py` - Main scraper with BaiscopeScraperTelegram class (3 parallel workers)
 - `app.py` - Flask wrapper for Render web service
+- `sync_telegram.py` - Syncs existing Telegram files to D1 for duplicate detection
 - `requirements.txt` - Python dependencies
 - `render.yaml` - Render deployment config
+
+## API Endpoints
+- `/` - Health check
+- `/status` - Get scraper status and progress
+- `/restart` - Restart the scraper
+- `/sync` - Start syncing existing Telegram files to D1 database
+- `/sync/status` - Check sync progress
 
 ## Environment Variables (on Render)
 ### Required:
 - `TELEGRAM_BOT_TOKEN` - Telegram bot token for uploading subtitles
 - `TELEGRAM_CHAT_ID` - Telegram channel ID (default: -1003442794989)
 
-### For D1 Database (optional but recommended):
+### For D1 Database (required for duplicate detection):
 - `CF_ACCOUNT_ID` - Cloudflare account ID
 - `CF_API_TOKEN` - Cloudflare API token with D1 permissions
 - `D1_DATABASE_ID` - D1 database UUID
+
+### For Telegram Sync (to fetch existing 20k+ files):
+- `TELEGRAM_API_ID` - Get from https://my.telegram.org
+- `TELEGRAM_API_HASH` - Get from https://my.telegram.org
 
 ### Optional:
 - `BATCH_SIZE` - Processing batch size (default: 50)

@@ -11,7 +11,17 @@ import random
 import requests
 import threading
 import signal
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def normalize_filename(filename):
+    if not filename:
+        return ""
+    name = filename.lower()
+    name = re.sub(r'\.[^.]+$', '', name)
+    name = re.sub(r'[^a-z0-9\u0D80-\u0DFF]', '', name)
+    return name
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -69,6 +79,7 @@ class CloudflareD1:
                     file_id TEXT UNIQUE NOT NULL,
                     file_unique_id TEXT,
                     filename TEXT,
+                    normalized_filename TEXT,
                     file_size INTEGER,
                     title TEXT,
                     source_url TEXT,
@@ -77,6 +88,10 @@ class CloudflareD1:
                     uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            self.execute("ALTER TABLE telegram_files ADD COLUMN normalized_filename TEXT")
+            
+            self.execute("CREATE INDEX IF NOT EXISTS idx_normalized_filename ON telegram_files(normalized_filename)")
             
             logger.info("D1 database tables initialized")
         except Exception as e:
@@ -180,6 +195,30 @@ class CloudflareD1:
         if result and len(result) > 0:
             return result[0].get("results", [])
         return []
+    
+    def file_exists_by_normalized_name(self, normalized_filename):
+        result = self.execute(
+            "SELECT 1 FROM telegram_files WHERE normalized_filename = ?",
+            [normalized_filename]
+        )
+        if result and len(result) > 0:
+            return len(result[0].get("results", [])) > 0
+        return False
+    
+    def get_all_normalized_filenames(self):
+        result = self.execute("SELECT normalized_filename FROM telegram_files WHERE normalized_filename IS NOT NULL")
+        if result and len(result) > 0:
+            return set(row.get("normalized_filename", "") for row in result[0].get("results", []) if row.get("normalized_filename"))
+        return set()
+    
+    def save_telegram_file_with_normalized(self, file_id, file_unique_id, filename, normalized_filename, file_size, title, source_url, category, message_id):
+        return self.execute(
+            """INSERT OR REPLACE INTO telegram_files 
+               (file_id, file_unique_id, filename, normalized_filename, file_size, title, source_url, category, message_id, uploaded_at) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+            [file_id, file_unique_id, filename, normalized_filename, file_size, title[:200] if title else "", 
+             source_url[:500] if source_url else "", category or "", message_id]
+        )
 
 
 class TelegramUploader:
@@ -391,6 +430,7 @@ class BaiscopeScraperTelegram:
         self.browser_versions = ["chrome110", "chrome116", "chrome120", "chrome124"]
         
         self.processed_urls = self._load_processed_urls()
+        self.existing_filenames = self._load_existing_filenames()
         self._setup_signal_handlers()
         
         self.consecutive_403s = 0
@@ -435,6 +475,14 @@ class BaiscopeScraperTelegram:
             logger.warning(f"Error loading state: {e}")
         
         logger.info("No previous state found, starting fresh")
+        return set()
+    
+    def _load_existing_filenames(self):
+        if self.d1.enabled:
+            filenames = self.d1.get_all_normalized_filenames()
+            if filenames:
+                logger.info(f"Loaded {len(filenames)} existing filenames from D1 for duplicate check")
+                return filenames
         return set()
     
     def _save_state_local(self):
@@ -624,6 +672,13 @@ class BaiscopeScraperTelegram:
                 final_filename = f"{clean_title}_{srt_filename}" if clean_title else srt_filename
                 final_filename = final_filename.replace('/', '_').replace('\\', '_')
                 
+                normalized = normalize_filename(final_filename)
+                with self.lock:
+                    if self.d1.enabled and normalized in self.existing_filenames:
+                        logger.info(f"SKIPPING (already exists in Telegram): {final_filename}")
+                        success_count += 1
+                        continue
+                
                 caption = f"<b>{title_text[:200]}</b>\n\nSource: {subtitle_url[:100]}"
                 
                 file_info = self.telegram.send_document(srt_content, final_filename, caption)
@@ -631,16 +686,19 @@ class BaiscopeScraperTelegram:
                     success_count += 1
                     
                     if self.d1.enabled and file_info.get('file_id'):
-                        self.d1.save_telegram_file(
+                        self.d1.save_telegram_file_with_normalized(
                             file_id=file_info['file_id'],
                             file_unique_id=file_info.get('file_unique_id', ''),
                             filename=final_filename,
+                            normalized_filename=normalized,
                             file_size=file_info.get('file_size', 0),
                             title=title_text,
                             source_url=subtitle_url,
                             category=self.current_category,
                             message_id=file_info.get('message_id', 0)
                         )
+                        with self.lock:
+                            self.existing_filenames.add(normalized)
                     
                     time.sleep(random.uniform(0.2, 0.5))
             

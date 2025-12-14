@@ -3,6 +3,7 @@ import threading
 import time
 from flask import Flask, jsonify
 from main import BaiscopeScraperTelegram
+from sync_telegram import sync_existing_files
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,6 +21,8 @@ scraper_status = {
 
 current_scraper = None
 scraper_thread = None
+sync_thread = None
+sync_status = {'status': 'idle', 'synced': 0}
 
 def run_scraper():
     global current_scraper, scraper_status
@@ -128,6 +131,41 @@ def restart():
     
     start_scraper_if_needed()
     return jsonify({'message': 'Scraper restarted'})
+
+def run_sync():
+    global sync_status
+    try:
+        sync_status['status'] = 'running'
+        count = sync_existing_files()
+        sync_status['synced'] = count
+        sync_status['status'] = 'completed'
+    except Exception as e:
+        logger.error(f"Sync error: {e}")
+        sync_status['status'] = f'error: {str(e)[:100]}'
+
+@app.route('/sync')
+def sync():
+    global sync_thread, sync_status
+    
+    if sync_thread and sync_thread.is_alive():
+        return jsonify({'status': 'already running', 'synced': sync_status.get('synced', 0)})
+    
+    sync_status = {'status': 'starting', 'synced': 0}
+    sync_thread = threading.Thread(target=run_sync, daemon=True)
+    sync_thread.start()
+    
+    return jsonify({'message': 'Sync started - fetching existing files from Telegram channel'})
+
+@app.route('/sync/status')
+def sync_status_endpoint():
+    global sync_thread, sync_status
+    
+    response = {
+        'status': sync_status.get('status', 'idle'),
+        'synced': sync_status.get('synced', 0),
+        'running': sync_thread.is_alive() if sync_thread else False
+    }
+    return jsonify(response)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
