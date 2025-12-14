@@ -16,6 +16,10 @@ A Python scraper that downloads 20,000+ Sinhala subtitles from baiscope.lk and u
 - Uploads subtitles to Cloudflare R2 with metadata
 - Crawls all categories (movies, anime, drama, horror, etc.)
 - Telegram progress notifications
+- **Resume capability** - Saves progress to R2, continues from where it left off
+- **Duplicate skipping** - Automatically skips already processed URLs
+- **Batch processing** - Processes URLs in configurable batches (default: 100)
+- **Graceful shutdown** - Saves state when receiving SIGTERM/SIGINT signals
 
 ## Files
 - `main.py` - Main scraper with BaiscopeScraperAdvanced class
@@ -31,6 +35,7 @@ A Python scraper that downloads 20,000+ Sinhala subtitles from baiscope.lk and u
 - `R2_BUCKET_NAME` - Bucket name (default: baiscope-subtitles)
 - `TELEGRAM_BOT_TOKEN` - Telegram bot token for notifications
 - `TELEGRAM_CHAT_ID` - Telegram chat ID for notifications
+- `BATCH_SIZE` - Number of URLs to process per run (default: 100)
 
 ## GitHub
 - Repository: github.com/oshada497/baiscope-scraper
@@ -39,6 +44,7 @@ A Python scraper that downloads 20,000+ Sinhala subtitles from baiscope.lk and u
 ## R2 Storage Structure
 ```
 subtitles/{movie_title}/{srt_filename}
+scraper_state/progress.json  (stores processed URLs for resume capability)
 ```
 
 ## Notes
