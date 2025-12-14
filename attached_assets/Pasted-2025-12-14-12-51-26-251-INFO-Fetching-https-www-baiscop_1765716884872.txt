@@ -1,0 +1,71 @@
+2025-12-14 12:51:26,251 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/27/ (attempt 3, browser: chrome120)
+2025-12-14 12:51:31,063 - INFO - Found 70 new links on /category/sinhala-subtitles/ page 27 (Total: 9745)
+2025-12-14 12:51:32,010 - INFO - Fetching /category/sinhala-subtitles/ page 28
+2025-12-14 12:51:32,011 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/28/ (attempt 1, browser: chrome120)
+2025-12-14 12:51:32,057 - WARNING - Attempt 1 failed: HTTP Error 403: 
+2025-12-14 12:51:39,445 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/28/ (attempt 2, browser: chrome120)
+2025-12-14 12:51:39,479 - WARNING - Attempt 2 failed: HTTP Error 403: 
+2025-12-14 12:51:48,030 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/28/ (attempt 3, browser: chrome110)
+2025-12-14 12:51:52,464 - INFO - Found 84 new links on /category/sinhala-subtitles/ page 28 (Total: 9829)
+2025-12-14 12:51:53,450 - INFO - Fetching /category/sinhala-subtitles/ page 29
+2025-12-14 12:51:53,450 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/29/ (attempt 1, browser: chrome110)
+2025-12-14 12:51:57,769 - INFO - Found 61 new links on /category/sinhala-subtitles/ page 29 (Total: 9890)
+2025-12-14 12:51:58,442 - INFO - Fetching /category/sinhala-subtitles/ page 30
+2025-12-14 12:51:58,442 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/30/ (attempt 1, browser: chrome124)
+2025-12-14 12:51:58,480 - WARNING - Attempt 1 failed: HTTP Error 403: 
+2025-12-14 12:52:06,457 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/30/ (attempt 2, browser: chrome116)
+2025-12-14 12:52:10,361 - INFO - Found 70 new links on /category/sinhala-subtitles/ page 30 (Total: 9960)
+2025-12-14 12:52:10,988 - INFO - Fetching /category/sinhala-subtitles/ page 31
+2025-12-14 12:52:10,988 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/31/ (attempt 1, browser: chrome116)
+2025-12-14 12:52:15,171 - INFO - Found 57 new links on /category/sinhala-subtitles/ page 31 (Total: 10017)
+2025-12-14 12:52:15,741 - INFO - Fetching /category/sinhala-subtitles/ page 32
+2025-12-14 12:52:15,741 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/32/ (attempt 1, browser: chrome110)
+2025-12-14 12:52:20,265 - INFO - Found 83 new links on /category/sinhala-subtitles/ page 32 (Total: 10100)
+2025-12-14 12:52:21,160 - INFO - Fetching /category/sinhala-subtitles/ page 33
+2025-12-14 12:52:21,160 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/33/ (attempt 1, browser: chrome120)
+2025-12-14 12:52:21,195 - WARNING - Attempt 1 failed: HTTP Error 403: 
+2025-12-14 12:52:29,900 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/33/ (attempt 2, browser: chrome116)
+2025-12-14 12:52:34,471 - INFO - Found 80 new links on /category/sinhala-subtitles/ page 33 (Total: 10180)
+2025-12-14 12:52:35,308 - INFO - Fetching /category/sinhala-subtitles/ page 34
+2025-12-14 12:52:35,308 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/34/ (attempt 1, browser: chrome120)
+2025-12-14 12:52:35,344 - WARNING - Attempt 1 failed: HTTP Error 403: 
+2025-12-14 12:52:40,432 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/34/ (attempt 2, browser: chrome116)
+2025-12-14 12:52:44,573 - INFO - Found 75 new links on /category/sinhala-subtitles/ page 34 (Total: 10255)
+2025-12-14 12:52:45,629 - INFO - Fetching /category/sinhala-subtitles/ page 35
+2025-12-14 12:52:45,630 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/35/ (attempt 1, browser: chrome120)
+2025-12-14 12:52:45,664 - WARNING - Attempt 1 failed: HTTP Error 403: 
+2025-12-14 12:52:52,326 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/35/ (attempt 2, browser: chrome120)
+2025-12-14 12:52:52,360 - WARNING - Attempt 2 failed: HTTP Error 403: 
+2025-12-14 12:53:01,563 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/35/ (attempt 3, browser: chrome124)
+2025-12-14 12:53:01,598 - WARNING - Attempt 3 failed: HTTP Error 403: 
+2025-12-14 12:53:01,598 - ERROR - Failed to fetch https://www.baiscope.lk/category/sinhala-subtitles/page/35/ after 3 attempts
+2025-12-14 12:53:01,599 - INFO - Fetching /category/sinhala-subtitles/ page 36
+2025-12-14 12:53:01,599 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/36/ (attempt 1, browser: chrome120)
+2025-12-14 12:53:06,359 - INFO - Found 78 new links on /category/sinhala-subtitles/ page 36 (Total: 10333)
+2025-12-14 12:53:07,271 - INFO - Fetching /category/sinhala-subtitles/ page 37
+2025-12-14 12:53:07,271 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/37/ (attempt 1, browser: chrome116)
+2025-12-14 12:53:01,563 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/35/ (attempt 3, browser: chrome124)
+2025-12-14 12:53:01,598 - WARNING - Attempt 3 failed: HTTP Error 403: 
+2025-12-14 12:53:01,598 - ERROR - Failed to fetch https://www.baiscope.lk/category/sinhala-subtitles/page/35/ after 3 attempts
+2025-12-14 12:53:01,599 - INFO - Fetching /category/sinhala-subtitles/ page 36
+2025-12-14 12:53:01,599 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/36/ (attempt 1, browser: chrome120)
+2025-12-14 12:53:06,359 - INFO - Found 78 new links on /category/sinhala-subtitles/ page 36 (Total: 10333)
+2025-12-14 12:53:07,271 - INFO - Fetching /category/sinhala-subtitles/ page 37
+2025-12-14 12:53:07,271 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/37/ (attempt 1, browser: chrome116)
+2025-12-14 12:53:12,066 - INFO - Found 68 new links on /category/sinhala-subtitles/ page 37 (Total: 10401)
+2025-12-14 12:53:12,866 - INFO - Fetching /category/sinhala-subtitles/ page 38
+2025-12-14 12:53:12,866 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/38/ (attempt 1, browser: chrome124)
+2025-12-14 12:53:12,905 - WARNING - Attempt 1 failed: HTTP Error 403: 
+2025-12-14 12:53:21,050 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/38/ (attempt 2, browser: chrome120)
+2025-12-14 12:53:25,372 - INFO - Found 26 new links on /category/sinhala-subtitles/ page 38 (Total: 10427)
+2025-12-14 12:53:26,274 - INFO - Fetching /category/sinhala-subtitles/ page 39
+2025-12-14 12:53:26,274 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/39/ (attempt 1, browser: chrome120)
+2025-12-14 12:53:26,313 - WARNING - Attempt 1 failed: HTTP Error 403: 
+[2025-12-14 12:53:30 +0000] [55] [INFO] Handling signal: term
+[2025-12-14 12:53:30 +0000] [57] [INFO] Worker exiting (pid: 57)
+2025-12-14 12:53:31,633 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/39/ (attempt 2, browser: chrome120)
+2025-12-14 12:53:31,783 - WARNING - Attempt 2 failed: HTTP Error 403: 
+[2025-12-14 12:53:31 +0000] [55] [INFO] Shutting down: Master
+2025-12-14 12:53:31,633 - INFO - Fetching https://www.baiscope.lk/category/sinhala-subtitles/page/39/ (attempt 2, browser: chrome120)
+2025-12-14 12:53:31,783 - WARNING - Attempt 2 failed: HTTP Error 403: 
+[2025-12-14 12:53:31 +0000] [55] [INFO] Shutting down: Master
