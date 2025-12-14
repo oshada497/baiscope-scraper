@@ -1,9 +1,9 @@
 services:
-  - type: worker
+  - type: web
     name: baiscope-scraper
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: gunicorn app:app
     envVars:
       - key: R2_ACCOUNT_ID
         sync: false
