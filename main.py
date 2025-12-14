@@ -11,6 +11,7 @@ import random
 import requests
 import threading
 import signal
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -395,6 +396,8 @@ class BaiscopeScraperTelegram:
         self.consecutive_403s = 0
         self.max_consecutive_403s = 10
         self.current_category = ""
+        self.lock = threading.Lock()
+        self.num_workers = 3
     
     def _setup_signal_handlers(self):
         def signal_handler(signum, frame):
@@ -675,30 +678,54 @@ class BaiscopeScraperTelegram:
         logger.info(f"Found {len(subtitle_urls)} subtitle links on {category} page {page}")
         return subtitle_urls
     
-    def process_page_subtitles(self, subtitle_urls):
-        success_count = 0
+    def _process_single_url(self, url):
+        """Process a single URL - used by parallel workers"""
+        if url in self.processed_urls:
+            logger.info(f"Skipping already processed: {url}")
+            return False
         
-        for url in subtitle_urls:
-            if url in self.processed_urls:
-                logger.info(f"Skipping already processed: {url}")
-                continue
+        try:
+            result, title = self.download_and_process_subtitle(url)
             
-            try:
-                result, title = self.download_and_process_subtitle(url)
+            with self.lock:
                 self._mark_url_processed(url, result, title)
-                
                 if result:
-                    success_count += 1
                     self.tracker.update(success=True)
                 else:
                     self.tracker.update(success=False)
-                
-                time.sleep(random.uniform(0.3, 0.8))
-                
-            except Exception as e:
-                logger.error(f"Error processing {url}: {e}")
+            
+            time.sleep(random.uniform(0.2, 0.5))
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error processing {url}: {e}")
+            with self.lock:
                 self._mark_url_processed(url, False, "")
                 self.tracker.update(success=False)
+            return False
+    
+    def process_page_subtitles(self, subtitle_urls):
+        success_count = 0
+        
+        urls_to_process = [url for url in subtitle_urls if url not in self.processed_urls]
+        
+        if not urls_to_process:
+            logger.info("No new URLs to process on this page")
+            return 0
+        
+        logger.info(f"Processing {len(urls_to_process)} URLs with {self.num_workers} parallel workers")
+        
+        with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+            futures = {executor.submit(self._process_single_url, url): url for url in urls_to_process}
+            
+            for future in as_completed(futures):
+                url = futures[future]
+                try:
+                    result = future.result()
+                    if result:
+                        success_count += 1
+                except Exception as e:
+                    logger.error(f"Worker error for {url}: {e}")
         
         self._save_state_local()
         return success_count
