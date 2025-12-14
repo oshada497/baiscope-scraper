@@ -1,0 +1,50 @@
+==> Deploying...
+==> Uploaded in 10.2s. Compression took 3.2s
+==> Build successful 🎉
+==> Running 'gunicorn app:app'
+[2025-12-14 12:07:58 +0000] [56] [INFO] Starting gunicorn 23.0.0
+[2025-12-14 12:07:58 +0000] [56] [INFO] Listening at: http://0.0.0.0:10000 (56)
+[2025-12-14 12:07:58 +0000] [56] [INFO] Using worker: sync
+[2025-12-14 12:07:58 +0000] [58] [INFO] Booting worker with pid: 58
+127.0.0.1 - - [14/Dec/2025:12:07:59 +0000] "HEAD / HTTP/1.1" 200 0 "-" "Go-http-client/1.1"
+2025-12-14 12:08:00,221 - INFO - Bucket 'baiscope-subtitles' exists
+2025-12-14 12:08:00,221 - INFO - Starting Baiscope.lk subtitle scraper with Cloudflare bypass...
+2025-12-14 12:08:00,221 - INFO - Fetching subtitle list page 1
+2025-12-14 12:08:00,221 - INFO - Initializing cloudscraper...
+2025-12-14 12:08:00,307 - INFO - Fetching https://www.baiscope.lk/subtitles/ (attempt 1)
+2025-12-14 12:08:00,733 - WARNING - Attempt 1 failed: 403 Client Error: Forbidden for url: https://www.baiscope.lk/subtitles/
+2025-12-14 12:08:00,221 - INFO - Bucket 'baiscope-subtitles' exists
+2025-12-14 12:08:00,221 - INFO - Starting Baiscope.lk subtitle scraper with Cloudflare bypass...
+2025-12-14 12:08:00,221 - INFO - Fetching subtitle list page 1
+2025-12-14 12:08:00,221 - INFO - Initializing cloudscraper...
+2025-12-14 12:08:00,307 - INFO - Fetching https://www.baiscope.lk/subtitles/ (attempt 1)
+2025-12-14 12:08:00,733 - WARNING - Attempt 1 failed: 403 Client Error: Forbidden for url: https://www.baiscope.lk/subtitles/
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://baiscope-scraper.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+127.0.0.1 - - [14/Dec/2025:12:08:05 +0000] "GET / HTTP/1.1" 200 15 "-" "Go-http-client/2.0"
+2025-12-14 12:08:00,221 - INFO - Bucket 'baiscope-subtitles' exists
+2025-12-14 12:08:00,221 - INFO - Starting Baiscope.lk subtitle scraper with Cloudflare bypass...
+2025-12-14 12:08:00,221 - INFO - Fetching subtitle list page 1
+2025-12-14 12:08:00,221 - INFO - Initializing cloudscraper...
+2025-12-14 12:08:00,307 - INFO - Fetching https://www.baiscope.lk/subtitles/ (attempt 1)
+2025-12-14 12:08:00,733 - WARNING - Attempt 1 failed: 403 Client Error: Forbidden for url: https://www.baiscope.lk/subtitles/
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://baiscope-scraper.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+127.0.0.1 - - [14/Dec/2025:12:08:05 +0000] "GET / HTTP/1.1" 200 15 "-" "Go-http-client/2.0"
+2025-12-14 12:08:09,430 - INFO - Fetching https://www.baiscope.lk/subtitles/ (attempt 2)
+2025-12-14 12:08:09,632 - WARNING - Attempt 2 failed: 403 Client Error: Forbidden for url: https://www.baiscope.lk/subtitles/
+2025-12-14 12:08:18,515 - INFO - Fetching https://www.baiscope.lk/subtitles/ (attempt 3)
+2025-12-14 12:08:18,724 - WARNING - Attempt 3 failed: 403 Client Error: Forbidden for url: https://www.baiscope.lk/subtitles/
+2025-12-14 12:08:18,724 - ERROR - Failed to fetch https://www.baiscope.lk/subtitles/ after 3 attempts
+2025-12-14 12:08:18,724 - INFO - Total subtitle pages found: 0
+2025-12-14 12:08:24,013 - INFO - Scraping complete! Successfully processed 0/0 subtitles

@@ -1,4 +1,4 @@
-import cloudscraper
+from curl_cffi import requests as curl_requests
 from bs4 import BeautifulSoup
 import os
 import time
@@ -8,7 +8,6 @@ import io
 import boto3
 from urllib.parse import urljoin, urlparse
 from botocore.exceptions import ClientError
-import tempfile
 import random
 import requests
 import threading
@@ -87,7 +86,7 @@ class ProgressTracker:
     def _notification_loop(self):
         while self.running:
             time.sleep(self.interval)
-            if self.running:
+            if self.running and self.total_found > 0:
                 elapsed = time.time() - self.start_time
                 hours, remainder = divmod(int(elapsed), 3600)
                 minutes, seconds = divmod(remainder, 60)
@@ -123,17 +122,10 @@ class BaiscopeScraperAdvanced:
         
         self._ensure_bucket_exists()
         
-        self.scraper = None
-        
         self.notifier = TelegramNotifier(telegram_token, telegram_chat_id)
         self.tracker = ProgressTracker(self.notifier, interval=60)
         
-        self.user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        ]
+        self.browser_versions = ["chrome110", "chrome116", "chrome120", "chrome124"]
     
     def _ensure_bucket_exists(self):
         try:
@@ -146,30 +138,25 @@ class BaiscopeScraperAdvanced:
             except Exception as e:
                 logger.error(f"Error creating bucket: {e}")
     
-    def _rotate_user_agent(self):
-        scraper = self._get_scraper()
-        scraper.headers.update({
-            'User-Agent': random.choice(self.user_agents),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
-        })
-    
-    def _get_scraper(self):
-        if self.scraper is None:
-            logger.info("Initializing cloudscraper...")
-            self.scraper = cloudscraper.create_scraper()
-        return self.scraper
-    
     def get_page(self, url, retries=3):
-        scraper = self._get_scraper()
         for attempt in range(retries):
             try:
-                logger.info(f"Fetching {url} (attempt {attempt + 1})")
-                response = scraper.get(url, timeout=30)
+                browser = random.choice(self.browser_versions)
+                logger.info(f"Fetching {url} (attempt {attempt + 1}, browser: {browser})")
+                
+                response = curl_requests.get(
+                    url,
+                    impersonate=browser,
+                    timeout=30,
+                    headers={
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.5',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'DNT': '1',
+                        'Connection': 'keep-alive',
+                        'Upgrade-Insecure-Requests': '1'
+                    }
+                )
                 response.raise_for_status()
                 
                 time.sleep(random.uniform(2, 5))
@@ -356,7 +343,7 @@ class BaiscopeScraperAdvanced:
             return False
     
     def scrape_all(self, limit=None):
-        logger.info("Starting Baiscope.lk subtitle scraper with Cloudflare bypass...")
+        logger.info("Starting Baiscope.lk subtitle scraper with curl_cffi browser impersonation...")
         
         subtitle_urls = self.get_all_subtitle_pages()
         
@@ -364,7 +351,8 @@ class BaiscopeScraperAdvanced:
             subtitle_urls = subtitle_urls[:limit]
             logger.info(f"Limited to first {limit} subtitles")
         
-        self.tracker.start(len(subtitle_urls))
+        if len(subtitle_urls) > 0:
+            self.tracker.start(len(subtitle_urls))
         
         success_count = 0
         for i, url in enumerate(subtitle_urls, 1):
@@ -376,7 +364,8 @@ class BaiscopeScraperAdvanced:
             
             time.sleep(random.uniform(4, 8))
         
-        self.tracker.stop()
+        if len(subtitle_urls) > 0:
+            self.tracker.stop()
         
         logger.info(f"Scraping complete! Successfully processed {success_count}/{len(subtitle_urls)} subtitles")
         return success_count
