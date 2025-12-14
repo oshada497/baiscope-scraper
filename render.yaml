@@ -17,3 +17,5 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+      - key: BATCH_SIZE
+        value: "100"

@@ -21,13 +21,16 @@ def run_scraper():
         logger.error("Missing R2 credentials!")
         return
     
+    BATCH_SIZE = int(os.environ.get('BATCH_SIZE', 100))
+    
     scraper = BaiscopeScraperAdvanced(
         r2_account_id=R2_ACCOUNT_ID,
         r2_access_key=R2_ACCESS_KEY,
         r2_secret_key=R2_SECRET_KEY,
         r2_bucket_name=R2_BUCKET_NAME,
         telegram_token=TELEGRAM_BOT_TOKEN,
-        telegram_chat_id=TELEGRAM_CHAT_ID
+        telegram_chat_id=TELEGRAM_CHAT_ID,
+        batch_size=BATCH_SIZE
     )
     scraper.scrape_all()
 

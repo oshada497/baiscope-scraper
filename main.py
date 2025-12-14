@@ -5,12 +5,14 @@ import time
 import logging
 import zipfile
 import io
+import json
 import boto3
 from urllib.parse import urljoin, urlparse
 from botocore.exceptions import ClientError
 import random
 import requests
 import threading
+import signal
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -109,8 +111,10 @@ class ProgressTracker:
 
 class BaiscopeScraperAdvanced:
     def __init__(self, r2_account_id, r2_access_key, r2_secret_key, r2_bucket_name, 
-                 telegram_token=None, telegram_chat_id=None):
+                 telegram_token=None, telegram_chat_id=None, batch_size=100):
         self.base_url = 'https://www.baiscope.lk'
+        self.batch_size = batch_size
+        self.state_file = 'scraper_state/progress.json'
         
         self.s3_client = boto3.client(
             's3',
@@ -127,6 +131,27 @@ class BaiscopeScraperAdvanced:
         self.tracker = ProgressTracker(self.notifier, interval=60)
         
         self.browser_versions = ["chrome110", "chrome116", "chrome120", "chrome124"]
+        
+        self.processed_urls = self._load_state()
+        self._setup_signal_handlers()
+    
+    def _setup_signal_handlers(self):
+        def signal_handler(signum, frame):
+            logger.info(f"Received signal {signum}, saving state before exit...")
+            self._save_state()
+            self.notifier.send_message(
+                f"<b>Scraper Interrupted</b>\n"
+                f"Saved progress: {len(self.processed_urls)} URLs processed\n"
+                f"Will resume from here on next run"
+            )
+            logger.info("State saved, exiting gracefully")
+        
+        try:
+            signal.signal(signal.SIGTERM, signal_handler)
+            signal.signal(signal.SIGINT, signal_handler)
+            logger.info("Signal handlers registered for graceful shutdown")
+        except Exception as e:
+            logger.warning(f"Could not register signal handlers: {e}")
     
     def _ensure_bucket_exists(self):
         try:
@@ -138,6 +163,39 @@ class BaiscopeScraperAdvanced:
                 logger.info(f"Created bucket '{self.bucket_name}'")
             except Exception as e:
                 logger.error(f"Error creating bucket: {e}")
+    
+    def _load_state(self):
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=self.state_file)
+            state = json.loads(response['Body'].read().decode('utf-8'))
+            processed = set(state.get('processed_urls', []))
+            logger.info(f"Loaded state: {len(processed)} previously processed URLs")
+            return processed
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                logger.info("No previous state found, starting fresh")
+            else:
+                logger.warning(f"Error loading state: {e}")
+            return set()
+        except Exception as e:
+            logger.warning(f"Error loading state: {e}")
+            return set()
+    
+    def _save_state(self):
+        try:
+            state = {
+                'processed_urls': list(self.processed_urls),
+                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=self.state_file,
+                Body=json.dumps(state),
+                ContentType='application/json'
+            )
+            logger.info(f"Saved state: {len(self.processed_urls)} processed URLs")
+        except Exception as e:
+            logger.error(f"Error saving state: {e}")
     
     def get_page(self, url, retries=3):
         for attempt in range(retries):
@@ -376,46 +434,70 @@ class BaiscopeScraperAdvanced:
     
     def scrape_all(self, limit=None, workers=5):
         logger.info("Starting Baiscope.lk subtitle scraper with curl_cffi browser impersonation...")
-        logger.info(f"Using {workers} parallel workers")
+        logger.info(f"Using {workers} parallel workers, batch size: {self.batch_size}")
+        logger.info(f"Previously processed URLs: {len(self.processed_urls)}")
         
         subtitle_urls = self.get_all_subtitle_pages()
         
-        if limit:
-            subtitle_urls = subtitle_urls[:limit]
+        new_urls = [url for url in subtitle_urls if url not in self.processed_urls]
+        skipped_count = len(subtitle_urls) - len(new_urls)
+        logger.info(f"Skipping {skipped_count} already processed URLs")
+        logger.info(f"New URLs to process: {len(new_urls)}")
+        
+        if self.batch_size and len(new_urls) > self.batch_size:
+            new_urls = new_urls[:self.batch_size]
+            logger.info(f"Processing batch of {self.batch_size} URLs (remaining: {len(subtitle_urls) - skipped_count - self.batch_size})")
+        
+        if limit and len(new_urls) > limit:
+            new_urls = new_urls[:limit]
             logger.info(f"Limited to first {limit} subtitles")
         
-        if len(subtitle_urls) > 0:
-            self.tracker.start(len(subtitle_urls))
+        if len(new_urls) == 0:
+            logger.info("No new URLs to process!")
+            self.notifier.send_message("<b>Scraper Status</b>\nNo new subtitles to process. All caught up!")
+            return 0
+        
+        self.tracker.start(len(new_urls))
         
         success_count = 0
+        batch_processed = 0
         
         def process_url(url):
             try:
                 result = self.download_and_process_subtitle(url)
                 time.sleep(random.uniform(0.5, 1))
-                return result
+                return url, result
             except Exception as e:
                 logger.error(f"Error processing {url}: {e}")
-                return False
+                return url, False
         
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(process_url, url): url for url in subtitle_urls}
+            futures = {executor.submit(process_url, url): url for url in new_urls}
             
             for future in as_completed(futures):
                 url = futures[future]
                 try:
-                    success = future.result()
+                    processed_url, success = future.result()
+                    self.processed_urls.add(processed_url)
+                    batch_processed += 1
+                    
                     if success:
                         success_count += 1
                     self.tracker.update(success=success)
+                    
+                    if batch_processed % 10 == 0:
+                        self._save_state()
+                        
                 except Exception as e:
                     logger.error(f"Future error for {url}: {e}")
+                    self.processed_urls.add(url)
                     self.tracker.update(success=False)
         
-        if len(subtitle_urls) > 0:
-            self.tracker.stop()
+        self._save_state()
+        self.tracker.stop()
         
-        logger.info(f"Scraping complete! Successfully processed {success_count}/{len(subtitle_urls)} subtitles")
+        logger.info(f"Batch complete! Successfully processed {success_count}/{len(new_urls)} subtitles")
+        logger.info(f"Total processed so far: {len(self.processed_urls)}")
         return success_count
 
 
@@ -439,13 +521,16 @@ if __name__ == '__main__':
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.warning("Telegram notifications disabled. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to enable.")
     
+    BATCH_SIZE = int(os.environ.get('BATCH_SIZE', 100))
+    
     scraper = BaiscopeScraperAdvanced(
         r2_account_id=R2_ACCOUNT_ID,
         r2_access_key=R2_ACCESS_KEY,
         r2_secret_key=R2_SECRET_KEY,
         r2_bucket_name=R2_BUCKET_NAME,
         telegram_token=TELEGRAM_BOT_TOKEN,
-        telegram_chat_id=TELEGRAM_CHAT_ID
+        telegram_chat_id=TELEGRAM_CHAT_ID,
+        batch_size=BATCH_SIZE
     )
     
     scraper.scrape_all()
