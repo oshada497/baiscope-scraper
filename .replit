@@ -18,6 +18,28 @@ deploymentTarget = "cloudrun"
 expertMode = true
 
 [workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Baiscope Scraper"
+
+[[workflows.workflow]]
+name = "Baiscope Scraper"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python app.py"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
 
 [userenv]
 

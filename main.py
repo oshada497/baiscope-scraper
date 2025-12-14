@@ -62,6 +62,21 @@ class CloudflareD1:
                 )
             """)
             
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS telegram_files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_id TEXT UNIQUE NOT NULL,
+                    file_unique_id TEXT,
+                    filename TEXT,
+                    file_size INTEGER,
+                    title TEXT,
+                    source_url TEXT,
+                    category TEXT,
+                    message_id INTEGER,
+                    uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             logger.info("D1 database tables initialized")
         except Exception as e:
             logger.error(f"Failed to initialize D1 tables: {e}")
@@ -141,6 +156,29 @@ class CloudflareD1:
             if results:
                 return results[0].get("current_category", ""), results[0].get("current_page", 1)
         return None, None
+    
+    def save_telegram_file(self, file_id, file_unique_id, filename, file_size, title, source_url, category, message_id):
+        return self.execute(
+            """INSERT OR REPLACE INTO telegram_files 
+               (file_id, file_unique_id, filename, file_size, title, source_url, category, message_id, uploaded_at) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+            [file_id, file_unique_id, filename, file_size, title[:200] if title else "", 
+             source_url[:500] if source_url else "", category or "", message_id]
+        )
+    
+    def get_telegram_files_count(self):
+        result = self.execute("SELECT COUNT(*) as count FROM telegram_files")
+        if result and len(result) > 0:
+            results = result[0].get("results", [])
+            if results:
+                return results[0].get("count", 0)
+        return 0
+    
+    def get_telegram_file_by_title(self, title):
+        result = self.execute("SELECT * FROM telegram_files WHERE title LIKE ?", [f"%{title}%"])
+        if result and len(result) > 0:
+            return result[0].get("results", [])
+        return []
 
 
 class TelegramUploader:
@@ -202,7 +240,7 @@ class TelegramUploader:
     
     def send_document(self, file_content, filename, caption=None, retries=5):
         if not self.enabled:
-            return False
+            return None
             
         for attempt in range(retries):
             self._wait_for_rate_limit()
@@ -232,7 +270,16 @@ class TelegramUploader:
                 if response.status_code == 200:
                     self.consecutive_429s = max(0, self.consecutive_429s - 1)
                     logger.info(f"Uploaded to Telegram: {filename}")
-                    return True
+                    
+                    result = response.json().get('result', {})
+                    document = result.get('document', {})
+                    return {
+                        'file_id': document.get('file_id', ''),
+                        'file_unique_id': document.get('file_unique_id', ''),
+                        'file_size': document.get('file_size', 0),
+                        'message_id': result.get('message_id', 0),
+                        'filename': filename
+                    }
                     
                 logger.warning(f"Telegram upload failed: {response.status_code} - {response.text}")
                 if attempt < retries - 1:
@@ -247,7 +294,7 @@ class TelegramUploader:
                 if attempt < retries - 1:
                     time.sleep(2 ** attempt)
                     
-        return False
+        return None
 
 
 class ProgressTracker:
@@ -347,6 +394,7 @@ class BaiscopeScraperTelegram:
         
         self.consecutive_403s = 0
         self.max_consecutive_403s = 10
+        self.current_category = ""
     
     def _setup_signal_handlers(self):
         def signal_handler(signum, frame):
@@ -575,8 +623,22 @@ class BaiscopeScraperTelegram:
                 
                 caption = f"<b>{title_text[:200]}</b>\n\nSource: {subtitle_url[:100]}"
                 
-                if self.telegram.send_document(srt_content, final_filename, caption):
+                file_info = self.telegram.send_document(srt_content, final_filename, caption)
+                if file_info:
                     success_count += 1
+                    
+                    if self.d1.enabled and file_info.get('file_id'):
+                        self.d1.save_telegram_file(
+                            file_id=file_info['file_id'],
+                            file_unique_id=file_info.get('file_unique_id', ''),
+                            filename=final_filename,
+                            file_size=file_info.get('file_size', 0),
+                            title=title_text,
+                            source_url=subtitle_url,
+                            category=self.current_category,
+                            message_id=file_info.get('message_id', 0)
+                        )
+                    
                     time.sleep(random.uniform(0.5, 1.5))
             
             logger.info(f"Uploaded {success_count}/{len(srt_files)} SRT files to Telegram")
@@ -708,6 +770,7 @@ class BaiscopeScraperTelegram:
             consecutive_empty = 0
             
             logger.info(f"\n=== Processing category: {category} ===")
+            self.current_category = category
             self.tracker.update_page(category, page)
             
             while page <= max_pages:
