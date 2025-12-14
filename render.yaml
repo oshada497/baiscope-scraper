@@ -3,19 +3,11 @@ services:
     name: baiscope-scraper
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn app:app --timeout 600 --workers 1
     envVars:
-      - key: R2_ACCOUNT_ID
-        sync: false
-      - key: R2_ACCESS_KEY
-        sync: false
-      - key: R2_SECRET_KEY
-        sync: false
-      - key: R2_BUCKET_NAME
-        value: baiscope-subtitles
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_CHAT_ID
-        sync: false
+        value: "-1003442794989"
       - key: BATCH_SIZE
-        value: "100"
+        value: "50"

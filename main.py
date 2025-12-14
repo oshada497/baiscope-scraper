@@ -6,46 +6,126 @@ import logging
 import zipfile
 import io
 import json
-import boto3
-from urllib.parse import urljoin, urlparse
-from botocore.exceptions import ClientError
+from urllib.parse import urljoin
 import random
 import requests
 import threading
 import signal
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
-class TelegramNotifier:
+class TelegramUploader:
     def __init__(self, bot_token, chat_id):
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.base_url = f"https://api.telegram.org/bot{bot_token}"
         self.enabled = bool(bot_token and chat_id)
+        self.last_request_time = 0
+        self.min_delay = 0.1
+        self.rate_limit_delay = 1.0
+        self.consecutive_429s = 0
         
-    def send_message(self, message):
+    def _wait_for_rate_limit(self):
+        elapsed = time.time() - self.last_request_time
+        if elapsed < self.min_delay:
+            time.sleep(self.min_delay - elapsed)
+        
+        if self.consecutive_429s > 0:
+            extra_delay = self.rate_limit_delay * (2 ** min(self.consecutive_429s, 5))
+            logger.info(f"Rate limit cooldown: waiting {extra_delay:.1f}s")
+            time.sleep(extra_delay)
+    
+    def send_message(self, message, retries=3):
         if not self.enabled:
             return False
-        try:
-            url = f"{self.base_url}/sendMessage"
-            data = {
-                'chat_id': self.chat_id,
-                'text': message,
-                'parse_mode': 'HTML'
-            }
-            response = requests.post(url, data=data, timeout=10)
-            return response.status_code == 200
-        except Exception as e:
-            logger.warning(f"Failed to send Telegram message: {e}")
+            
+        for attempt in range(retries):
+            self._wait_for_rate_limit()
+            try:
+                url = f"{self.base_url}/sendMessage"
+                data = {
+                    'chat_id': self.chat_id,
+                    'text': message,
+                    'parse_mode': 'HTML'
+                }
+                response = requests.post(url, data=data, timeout=30)
+                self.last_request_time = time.time()
+                
+                if response.status_code == 429:
+                    retry_after = response.json().get('parameters', {}).get('retry_after', 30)
+                    self.consecutive_429s += 1
+                    logger.warning(f"Telegram rate limited! Retry after {retry_after}s (attempt {attempt + 1})")
+                    time.sleep(retry_after + 1)
+                    continue
+                    
+                if response.status_code == 200:
+                    self.consecutive_429s = max(0, self.consecutive_429s - 1)
+                    return True
+                    
+                logger.warning(f"Telegram message failed: {response.status_code} - {response.text}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to send Telegram message: {e}")
+                if attempt < retries - 1:
+                    time.sleep(2 ** attempt)
+                    
+        return False
+    
+    def send_document(self, file_content, filename, caption=None, retries=5):
+        if not self.enabled:
             return False
+            
+        for attempt in range(retries):
+            self._wait_for_rate_limit()
+            try:
+                url = f"{self.base_url}/sendDocument"
+                
+                files = {
+                    'document': (filename, io.BytesIO(file_content), 'application/x-subrip')
+                }
+                data = {
+                    'chat_id': self.chat_id
+                }
+                if caption:
+                    data['caption'] = caption[:1024]
+                    data['parse_mode'] = 'HTML'
+                
+                response = requests.post(url, data=data, files=files, timeout=60)
+                self.last_request_time = time.time()
+                
+                if response.status_code == 429:
+                    retry_after = response.json().get('parameters', {}).get('retry_after', 30)
+                    self.consecutive_429s += 1
+                    logger.warning(f"Telegram rate limited on upload! Retry after {retry_after}s (attempt {attempt + 1})")
+                    time.sleep(retry_after + 2)
+                    continue
+                    
+                if response.status_code == 200:
+                    self.consecutive_429s = max(0, self.consecutive_429s - 1)
+                    logger.info(f"Uploaded to Telegram: {filename}")
+                    return True
+                    
+                logger.warning(f"Telegram upload failed: {response.status_code} - {response.text}")
+                if attempt < retries - 1:
+                    time.sleep(3 * (attempt + 1))
+                    
+            except requests.exceptions.Timeout:
+                logger.warning(f"Telegram upload timeout for {filename} (attempt {attempt + 1})")
+                if attempt < retries - 1:
+                    time.sleep(5 * (attempt + 1))
+            except Exception as e:
+                logger.error(f"Failed to upload to Telegram: {e}")
+                if attempt < retries - 1:
+                    time.sleep(2 ** attempt)
+                    
+        return False
 
 
 class ProgressTracker:
-    def __init__(self, telegram_notifier, interval=60):
-        self.notifier = telegram_notifier
+    def __init__(self, telegram_uploader, interval=120):
+        self.notifier = telegram_uploader
         self.interval = interval
         self.total_found = 0
         self.processed = 0
@@ -54,6 +134,8 @@ class ProgressTracker:
         self.start_time = None
         self.running = False
         self.thread = None
+        self.current_page = 0
+        self.current_category = ""
         
     def start(self, total_found):
         self.total_found = total_found
@@ -63,7 +145,7 @@ class ProgressTracker:
         self.thread.start()
         self.notifier.send_message(
             f"<b>Baiscope Scraper Started</b>\n"
-            f"Total subtitles found: {total_found}"
+            f"Total subtitles to process: {total_found}"
         )
         
     def update(self, success=True):
@@ -72,6 +154,10 @@ class ProgressTracker:
             self.success += 1
         else:
             self.failed += 1
+            
+    def update_page(self, category, page):
+        self.current_category = category
+        self.current_page = page
             
     def stop(self):
         self.running = False
@@ -100,7 +186,9 @@ class ProgressTracker:
                 eta_hours, eta_mins = divmod(int(eta_minutes), 60)
                 
                 self.notifier.send_message(
-                    f"<b>Scraper Progress Update</b>\n"
+                    f"<b>Scraper Progress</b>\n"
+                    f"Category: {self.current_category}\n"
+                    f"Page: {self.current_page}\n"
                     f"Processed: {self.processed}/{self.total_found} ({(self.processed/self.total_found*100):.1f}%)\n"
                     f"Success: {self.success} | Failed: {self.failed}\n"
                     f"Rate: {rate:.1f}/min\n"
@@ -109,38 +197,31 @@ class ProgressTracker:
                 )
 
 
-class BaiscopeScraperAdvanced:
-    def __init__(self, r2_account_id, r2_access_key, r2_secret_key, r2_bucket_name, 
-                 telegram_token=None, telegram_chat_id=None, batch_size=100):
+class BaiscopeScraperTelegram:
+    def __init__(self, telegram_token, telegram_chat_id, batch_size=50):
         self.base_url = 'https://www.baiscope.lk'
         self.batch_size = batch_size
-        self.state_file = 'scraper_state/progress.json'
-        self.urls_file = 'scraper_state/discovered_urls.json'
+        self.state_dir = 'scraper_state'
+        self.state_file = f'{self.state_dir}/progress.json'
         
-        self.s3_client = boto3.client(
-            's3',
-            endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
-            aws_access_key_id=r2_access_key,
-            aws_secret_access_key=r2_secret_key,
-            region_name='auto'
-        )
-        self.bucket_name = r2_bucket_name
+        os.makedirs(self.state_dir, exist_ok=True)
         
-        self._ensure_bucket_exists()
-        
-        self.notifier = TelegramNotifier(telegram_token, telegram_chat_id)
-        self.tracker = ProgressTracker(self.notifier, interval=60)
+        self.telegram = TelegramUploader(telegram_token, telegram_chat_id)
+        self.tracker = ProgressTracker(self.telegram, interval=120)
         
         self.browser_versions = ["chrome110", "chrome116", "chrome120", "chrome124"]
         
         self.processed_urls = self._load_state()
         self._setup_signal_handlers()
+        
+        self.consecutive_403s = 0
+        self.max_consecutive_403s = 10
     
     def _setup_signal_handlers(self):
         def signal_handler(signum, frame):
             logger.info(f"Received signal {signum}, saving state before exit...")
             self._save_state()
-            self.notifier.send_message(
+            self.telegram.send_message(
                 f"<b>Scraper Interrupted</b>\n"
                 f"Saved progress: {len(self.processed_urls)} URLs processed\n"
                 f"Will resume from here on next run"
@@ -154,116 +235,88 @@ class BaiscopeScraperAdvanced:
         except Exception as e:
             logger.warning(f"Could not register signal handlers: {e}")
     
-    def _ensure_bucket_exists(self):
-        try:
-            self.s3_client.head_bucket(Bucket=self.bucket_name)
-            logger.info(f"Bucket '{self.bucket_name}' exists")
-        except ClientError:
-            try:
-                self.s3_client.create_bucket(Bucket=self.bucket_name)
-                logger.info(f"Created bucket '{self.bucket_name}'")
-            except Exception as e:
-                logger.error(f"Error creating bucket: {e}")
-    
     def _load_state(self):
         try:
-            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=self.state_file)
-            state = json.loads(response['Body'].read().decode('utf-8'))
-            processed = set(state.get('processed_urls', []))
-            logger.info(f"Loaded state: {len(processed)} previously processed URLs")
-            return processed
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
-                logger.info("No previous state found, starting fresh")
-            else:
-                logger.warning(f"Error loading state: {e}")
-            return set()
+            if os.path.exists(self.state_file):
+                with open(self.state_file, 'r') as f:
+                    state = json.load(f)
+                processed = set(state.get('processed_urls', []))
+                logger.info(f"Loaded state: {len(processed)} previously processed URLs")
+                return processed
         except Exception as e:
             logger.warning(f"Error loading state: {e}")
-            return set()
+        
+        logger.info("No previous state found, starting fresh")
+        return set()
     
     def _save_state(self):
         try:
             state = {
                 'processed_urls': list(self.processed_urls),
-                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
+                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'count': len(self.processed_urls)
             }
-            self.s3_client.put_object(
-                Bucket=self.bucket_name,
-                Key=self.state_file,
-                Body=json.dumps(state),
-                ContentType='application/json'
-            )
+            with open(self.state_file, 'w') as f:
+                json.dump(state, f)
             logger.info(f"Saved state: {len(self.processed_urls)} processed URLs")
         except Exception as e:
             logger.error(f"Error saving state: {e}")
     
-    def _load_discovered_urls(self):
-        try:
-            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=self.urls_file)
-            data = json.loads(response['Body'].read().decode('utf-8'))
-            urls = data.get('urls', [])
-            discovered_at = data.get('discovered_at', 'unknown')
-            logger.info(f"Loaded {len(urls)} discovered URLs from R2 (discovered: {discovered_at})")
-            return urls
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
-                logger.info("No discovered URLs cache found")
-            return None
-        except Exception as e:
-            logger.warning(f"Error loading discovered URLs: {e}")
-            return None
-    
-    def _save_discovered_urls(self, urls):
-        try:
-            data = {
-                'urls': urls,
-                'count': len(urls),
-                'discovered_at': time.strftime('%Y-%m-%d %H:%M:%S')
-            }
-            self.s3_client.put_object(
-                Bucket=self.bucket_name,
-                Key=self.urls_file,
-                Body=json.dumps(data),
-                ContentType='application/json'
-            )
-            logger.info(f"Saved {len(urls)} discovered URLs to R2")
-        except Exception as e:
-            logger.error(f"Error saving discovered URLs: {e}")
-    
-    def get_page(self, url, retries=4):
+    def get_page(self, url, retries=6):
         for attempt in range(retries):
             try:
                 browser = random.choice(self.browser_versions)
                 logger.info(f"Fetching {url} (attempt {attempt + 1}, browser: {browser})")
                 
+                headers = {
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Cache-Control': 'max-age=0',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124"',
+                    'sec-ch-ua-mobile': '?0',
+                    'sec-ch-ua-platform': '"Windows"'
+                }
+                
                 response = curl_requests.get(
                     url,
                     impersonate=browser,
-                    timeout=30,
-                    headers={
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                        'Accept-Language': 'en-US,en;q=0.5',
-                        'Accept-Encoding': 'gzip, deflate, br',
-                        'DNT': '1',
-                        'Connection': 'keep-alive',
-                        'Upgrade-Insecure-Requests': '1',
-                        'Cache-Control': 'no-cache',
-                        'Pragma': 'no-cache'
-                    }
+                    timeout=45,
+                    headers=headers
                 )
                 response.raise_for_status()
                 
-                time.sleep(random.uniform(1.5, 3.0))
+                self.consecutive_403s = 0
+                time.sleep(random.uniform(2.0, 4.0))
                 return response
+                
             except Exception as e:
                 error_str = str(e)
                 is_403 = '403' in error_str
                 
                 if is_403:
-                    backoff_time = random.uniform(3, 6) * (attempt + 1)
-                    logger.warning(f"403 Blocked! Attempt {attempt + 1} - backing off for {backoff_time:.1f}s")
-                    time.sleep(backoff_time)
+                    self.consecutive_403s += 1
+                    base_backoff = 10
+                    backoff_time = base_backoff * (2 ** attempt) + random.uniform(5, 15)
+                    backoff_time = min(backoff_time, 120)
+                    
+                    logger.warning(f"403 Blocked! Attempt {attempt + 1}/{retries} - "
+                                   f"consecutive 403s: {self.consecutive_403s} - "
+                                   f"backing off for {backoff_time:.1f}s")
+                    
+                    if self.consecutive_403s >= self.max_consecutive_403s:
+                        logger.warning(f"Too many consecutive 403s ({self.consecutive_403s}), taking extended break...")
+                        time.sleep(random.uniform(60, 120))
+                        self.consecutive_403s = 0
+                    else:
+                        time.sleep(backoff_time)
                 else:
                     logger.warning(f"Attempt {attempt + 1} failed: {e}")
                     if attempt < retries - 1:
@@ -272,89 +325,7 @@ class BaiscopeScraperAdvanced:
                 if attempt == retries - 1:
                     logger.error(f"Failed to fetch {url} after {retries} attempts")
                     return None
-    
-    def get_all_subtitle_pages(self):
-        subtitle_urls = set()
-        
-        categories = [
-            "/category/sinhala-subtitles/movies/",
-            "/category/sinhala-subtitles/",
-            "/category/anime/",
-            "/category/war/",
-            "/category/crime/",
-            "/category/action/",
-            "/category/adventure/",
-            "/category/comedy/",
-            "/category/drama/",
-            "/category/fantasy/",
-            "/category/horror/",
-            "/category/mystery/",
-            "/category/romance/",
-            "/category/sci-fi/",
-            "/category/thriller/",
-            "/category/animation/",
-            "/category/biography/",
-            "/category/family/",
-            "/category/history/",
-            "/category/music/",
-            "/category/sport/",
-            "/category/western/",
-            "/category/documentary/",
-            "/category/tv-series/",
-            "/category/hindi-subtitles/",
-            "/category/korean-subtitles/",
-            "/category/tamil-subtitles/",
-        ]
-        
-        for category in categories:
-            page = 1
-            max_pages = 500
-            consecutive_empty = 0
-            
-            while page <= max_pages:
-                if page == 1:
-                    url = f"{self.base_url}{category}"
-                else:
-                    url = f"{self.base_url}{category}page/{page}/"
-                
-                logger.info(f"Fetching {category} page {page}")
-                response = self.get_page(url)
-                
-                if not response:
-                    consecutive_empty += 1
-                    if consecutive_empty >= 2:
-                        break
-                    page += 1
-                    continue
-                
-                soup = BeautifulSoup(response.text, 'html.parser')
-                
-                all_links = soup.find_all('a', href=True)
-                found_on_page = 0
-                
-                for link in all_links:
-                    href = link.get('href', '')
-                    if ('sinhala-subtitle' in href.lower() or 'subtitles' in href.lower()) and '/category/' not in href and '/tag/' not in href:
-                        full_url = href if href.startswith('http') else urljoin(self.base_url, href)
-                        if full_url not in subtitle_urls and 'baiscope.lk' in full_url and full_url != self.base_url + '/':
-                            subtitle_urls.add(full_url)
-                            found_on_page += 1
-                
-                logger.info(f"Found {found_on_page} new links on {category} page {page} (Total: {len(subtitle_urls)})")
-                
-                if found_on_page == 0:
-                    consecutive_empty += 1
-                    if consecutive_empty >= 2:
-                        logger.info(f"No more content in {category}")
-                        break
-                else:
-                    consecutive_empty = 0
-                
-                page += 1
-                time.sleep(random.uniform(0.5, 1))
-        
-        logger.info(f"Total subtitle pages found: {len(subtitle_urls)}")
-        return list(subtitle_urls)
+        return None
     
     def extract_srt_from_zip(self, zip_content):
         srt_files = {}
@@ -368,31 +339,12 @@ class BaiscopeScraperAdvanced:
                         srt_files[file_info.filename] = srt_content
         except zipfile.BadZipFile:
             logger.warning("Not a valid ZIP file, might be direct SRT")
-            if zip_content[:3] == b'\xef\xbb\xbf' or b'-->' in zip_content[:200]:
+            if zip_content[:3] == b'\xef\xbb\xbf' or b'-->' in zip_content[:500]:
                 srt_files['subtitle.srt'] = zip_content
         except Exception as e:
             logger.error(f"Error extracting ZIP: {e}")
         
         return srt_files
-    
-    def upload_to_r2(self, file_content, file_name, metadata=None):
-        try:
-            extra_args = {}
-            if metadata:
-                extra_args['Metadata'] = metadata
-            
-            self.s3_client.put_object(
-                Bucket=self.bucket_name,
-                Key=file_name,
-                Body=file_content,
-                **extra_args
-            )
-            
-            logger.info(f"Uploaded to R2: {file_name}")
-            return True
-        except Exception as e:
-            logger.error(f"Error uploading to R2: {e}")
-            return False
     
     def download_and_process_subtitle(self, subtitle_url):
         logger.info(f"Processing: {subtitle_url}")
@@ -456,138 +408,199 @@ class BaiscopeScraperAdvanced:
             
             success_count = 0
             for srt_filename, srt_content in srt_files.items():
-                clean_title = ''.join(c for c in title_text if c.isalnum() or c in (' ', '-', '_'))
-                clean_title = clean_title.strip().replace(' ', '_')[:100]
+                clean_title = ''.join(c for c in title_text if c.isalnum() or c in (' ', '-', '_', '.'))
+                clean_title = clean_title.strip()[:80]
                 
-                r2_filename = f"subtitles/{clean_title}/{srt_filename}"
+                final_filename = f"{clean_title}_{srt_filename}" if clean_title else srt_filename
+                final_filename = final_filename.replace('/', '_').replace('\\', '_')
                 
-                metadata = {
-                    'source_url': subtitle_url,
-                    'movie_title': title_text.encode('ascii', 'ignore').decode('ascii'),
-                    'download_date': time.strftime('%Y-%m-%d')
-                }
+                caption = f"<b>{title_text[:200]}</b>\n\nSource: {subtitle_url[:100]}"
                 
-                if self.upload_to_r2(srt_content, r2_filename, metadata):
+                if self.telegram.send_document(srt_content, final_filename, caption):
                     success_count += 1
+                    time.sleep(random.uniform(0.5, 1.5))
             
-            logger.info(f"Uploaded {success_count}/{len(srt_files)} SRT files to R2")
+            logger.info(f"Uploaded {success_count}/{len(srt_files)} SRT files to Telegram")
             return success_count > 0
             
         except Exception as e:
             logger.error(f"Error processing subtitle: {e}")
             return False
     
-    def scrape_all(self, limit=None, workers=3, force_recrawl=False):
-        logger.info("Starting Baiscope.lk subtitle scraper with curl_cffi browser impersonation...")
-        logger.info(f"Using {workers} parallel workers, batch size: {self.batch_size}")
-        logger.info(f"Previously processed URLs: {len(self.processed_urls)}")
-        
-        cached_urls = None if force_recrawl else self._load_discovered_urls()
-        
-        if cached_urls and len(cached_urls) > 0:
-            subtitle_urls = cached_urls
-            logger.info(f"Using {len(subtitle_urls)} cached URLs (skipping crawl)")
-            self.notifier.send_message(
-                f"<b>Scraper Resumed</b>\n"
-                f"Using cached URLs: {len(subtitle_urls)}\n"
-                f"Already processed: {len(self.processed_urls)}"
-            )
+    def get_subtitle_urls_from_page(self, category, page):
+        if page == 1:
+            url = f"{self.base_url}{category}"
         else:
-            logger.info("No cached URLs found, crawling all categories...")
-            self.notifier.send_message("<b>Scraper Starting</b>\nCrawling all categories to find subtitles...")
-            subtitle_urls = self.get_all_subtitle_pages()
-            self._save_discovered_urls(subtitle_urls)
-            self.notifier.send_message(f"<b>Crawl Complete</b>\nDiscovered {len(subtitle_urls)} subtitle URLs")
+            url = f"{self.base_url}{category}page/{page}/"
         
-        new_urls = [url for url in subtitle_urls if url not in self.processed_urls]
-        skipped_count = len(subtitle_urls) - len(new_urls)
-        logger.info(f"Skipping {skipped_count} already processed URLs")
-        logger.info(f"New URLs to process: {len(new_urls)}")
+        logger.info(f"Fetching {category} page {page}")
+        response = self.get_page(url)
         
-        if self.batch_size and len(new_urls) > self.batch_size:
-            new_urls = new_urls[:self.batch_size]
-            logger.info(f"Processing batch of {self.batch_size} URLs (remaining: {len(subtitle_urls) - skipped_count - self.batch_size})")
+        if not response:
+            return None
         
-        if limit and len(new_urls) > limit:
-            new_urls = new_urls[:limit]
-            logger.info(f"Limited to first {limit} subtitles")
+        soup = BeautifulSoup(response.text, 'html.parser')
         
-        if len(new_urls) == 0:
-            logger.info("No new URLs to process!")
-            self.notifier.send_message("<b>Scraper Status</b>\nNo new subtitles to process. All caught up!")
-            return 0
+        subtitle_urls = []
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            if ('sinhala-subtitle' in href.lower() or 'subtitles' in href.lower()) and '/category/' not in href and '/tag/' not in href:
+                full_url = href if href.startswith('http') else urljoin(self.base_url, href)
+                if 'baiscope.lk' in full_url and full_url != self.base_url + '/':
+                    if full_url not in subtitle_urls:
+                        subtitle_urls.append(full_url)
         
-        self.tracker.start(len(new_urls))
-        
+        logger.info(f"Found {len(subtitle_urls)} subtitle links on {category} page {page}")
+        return subtitle_urls
+    
+    def process_page_subtitles(self, subtitle_urls):
         success_count = 0
-        batch_processed = 0
         
-        def process_url(url):
+        for url in subtitle_urls:
+            if url in self.processed_urls:
+                logger.info(f"Skipping already processed: {url}")
+                continue
+            
             try:
                 result = self.download_and_process_subtitle(url)
-                time.sleep(random.uniform(0.5, 1))
-                return url, result
+                self.processed_urls.add(url)
+                
+                if result:
+                    success_count += 1
+                    self.tracker.update(success=True)
+                else:
+                    self.tracker.update(success=False)
+                
+                time.sleep(random.uniform(1.0, 2.5))
+                
             except Exception as e:
                 logger.error(f"Error processing {url}: {e}")
-                return url, False
-        
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(process_url, url): url for url in new_urls}
-            
-            for future in as_completed(futures):
-                url = futures[future]
-                try:
-                    processed_url, success = future.result()
-                    self.processed_urls.add(processed_url)
-                    batch_processed += 1
-                    
-                    if success:
-                        success_count += 1
-                    self.tracker.update(success=success)
-                    
-                    if batch_processed % 10 == 0:
-                        self._save_state()
-                        
-                except Exception as e:
-                    logger.error(f"Future error for {url}: {e}")
-                    self.processed_urls.add(url)
-                    self.tracker.update(success=False)
+                self.processed_urls.add(url)
+                self.tracker.update(success=False)
         
         self._save_state()
-        self.tracker.stop()
-        
-        logger.info(f"Batch complete! Successfully processed {success_count}/{len(new_urls)} subtitles")
-        logger.info(f"Total processed so far: {len(self.processed_urls)}")
         return success_count
+    
+    def scrape_all(self, limit=None):
+        logger.info("Starting Baiscope.lk subtitle scraper - Telegram storage mode")
+        logger.info(f"Previously processed URLs: {len(self.processed_urls)}")
+        
+        categories = [
+            "/category/sinhala-subtitles/movies/",
+            "/category/sinhala-subtitles/",
+            "/category/anime/",
+            "/category/war/",
+            "/category/crime/",
+            "/category/action/",
+            "/category/adventure/",
+            "/category/comedy/",
+            "/category/drama/",
+            "/category/fantasy/",
+            "/category/horror/",
+            "/category/mystery/",
+            "/category/romance/",
+            "/category/sci-fi/",
+            "/category/thriller/",
+            "/category/animation/",
+            "/category/biography/",
+            "/category/family/",
+            "/category/history/",
+            "/category/music/",
+            "/category/sport/",
+            "/category/western/",
+            "/category/documentary/",
+            "/category/tv-series/",
+            "/category/hindi-subtitles/",
+            "/category/korean-subtitles/",
+            "/category/tamil-subtitles/",
+        ]
+        
+        self.telegram.send_message(
+            f"<b>Baiscope Scraper Starting</b>\n"
+            f"Mode: Telegram Storage\n"
+            f"Categories: {len(categories)}\n"
+            f"Previously processed: {len(self.processed_urls)}"
+        )
+        
+        total_success = 0
+        total_processed = 0
+        
+        for category in categories:
+            page = 1
+            max_pages = 500
+            consecutive_empty = 0
+            
+            logger.info(f"\n=== Processing category: {category} ===")
+            self.tracker.update_page(category, page)
+            
+            while page <= max_pages:
+                subtitle_urls = self.get_subtitle_urls_from_page(category, page)
+                
+                if subtitle_urls is None:
+                    consecutive_empty += 1
+                    if consecutive_empty >= 3:
+                        logger.info(f"Too many failed pages, moving to next category")
+                        break
+                    page += 1
+                    continue
+                
+                new_urls = [url for url in subtitle_urls if url not in self.processed_urls]
+                
+                if len(new_urls) == 0:
+                    consecutive_empty += 1
+                    if consecutive_empty >= 3:
+                        logger.info(f"No more new content in {category}")
+                        break
+                    page += 1
+                    continue
+                
+                consecutive_empty = 0
+                self.tracker.update_page(category, page)
+                
+                logger.info(f"Processing {len(new_urls)} new subtitles from page {page}")
+                
+                success = self.process_page_subtitles(new_urls)
+                total_success += success
+                total_processed += len(new_urls)
+                
+                logger.info(f"Page {page} complete: {success}/{len(new_urls)} successful")
+                
+                if limit and total_processed >= limit:
+                    logger.info(f"Reached limit of {limit} subtitles")
+                    break
+                
+                page += 1
+                time.sleep(random.uniform(2.0, 4.0))
+            
+            if limit and total_processed >= limit:
+                break
+            
+            time.sleep(random.uniform(3.0, 6.0))
+        
+        self._save_state()
+        
+        self.telegram.send_message(
+            f"<b>Scraping Complete!</b>\n"
+            f"Total processed: {total_processed}\n"
+            f"Successfully uploaded: {total_success}\n"
+            f"Total in database: {len(self.processed_urls)}"
+        )
+        
+        logger.info(f"Scraping complete! Processed {total_processed}, success: {total_success}")
+        return total_success
 
 
 if __name__ == '__main__':
-    R2_ACCOUNT_ID = os.environ.get('R2_ACCOUNT_ID')
-    R2_ACCESS_KEY = os.environ.get('R2_ACCESS_KEY')
-    R2_SECRET_KEY = os.environ.get('R2_SECRET_KEY')
-    R2_BUCKET_NAME = os.environ.get('R2_BUCKET_NAME', 'baiscope-subtitles')
-    
     TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-    TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+    TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '-1003442794989')
     
-    if not all([R2_ACCOUNT_ID, R2_ACCESS_KEY, R2_SECRET_KEY]):
-        logger.error("Missing R2 credentials! Please set the following environment variables:")
-        logger.error("  - R2_ACCOUNT_ID: Your Cloudflare account ID")
-        logger.error("  - R2_ACCESS_KEY: Your R2 access key")
-        logger.error("  - R2_SECRET_KEY: Your R2 secret key")
-        logger.error("  - R2_BUCKET_NAME (optional): Bucket name (default: baiscope-subtitles)")
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("Missing TELEGRAM_BOT_TOKEN! Please set the environment variable.")
         exit(1)
     
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.warning("Telegram notifications disabled. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to enable.")
+    BATCH_SIZE = int(os.environ.get('BATCH_SIZE', 50))
     
-    BATCH_SIZE = int(os.environ.get('BATCH_SIZE', 100))
-    
-    scraper = BaiscopeScraperAdvanced(
-        r2_account_id=R2_ACCOUNT_ID,
-        r2_access_key=R2_ACCESS_KEY,
-        r2_secret_key=R2_SECRET_KEY,
-        r2_bucket_name=R2_BUCKET_NAME,
+    scraper = BaiscopeScraperTelegram(
         telegram_token=TELEGRAM_BOT_TOKEN,
         telegram_chat_id=TELEGRAM_CHAT_ID,
         batch_size=BATCH_SIZE

@@ -33,9 +33,19 @@ args = "Baiscope Scraper"
 name = "Baiscope Scraper"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python main.py"
+args = "python app.py"
+waitForPort = 5000
 
-[workflows.workflow.metadata]
-outputType = "console"
+[userenv]
+
+[userenv.shared]
+TELEGRAM_CHAT_ID = "-1003442794989"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
