@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError
 import random
 import requests
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -373,8 +374,9 @@ class BaiscopeScraperAdvanced:
             logger.error(f"Error processing subtitle: {e}")
             return False
     
-    def scrape_all(self, limit=None):
+    def scrape_all(self, limit=None, workers=5):
         logger.info("Starting Baiscope.lk subtitle scraper with curl_cffi browser impersonation...")
+        logger.info(f"Using {workers} parallel workers")
         
         subtitle_urls = self.get_all_subtitle_pages()
         
@@ -386,14 +388,29 @@ class BaiscopeScraperAdvanced:
             self.tracker.start(len(subtitle_urls))
         
         success_count = 0
-        for i, url in enumerate(subtitle_urls, 1):
-            logger.info(f"Processing {i}/{len(subtitle_urls)}: {url}")
-            success = self.download_and_process_subtitle(url)
-            if success:
-                success_count += 1
-            self.tracker.update(success=success)
+        
+        def process_url(url):
+            try:
+                result = self.download_and_process_subtitle(url)
+                time.sleep(random.uniform(0.5, 1))
+                return result
+            except Exception as e:
+                logger.error(f"Error processing {url}: {e}")
+                return False
+        
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(process_url, url): url for url in subtitle_urls}
             
-            time.sleep(random.uniform(1, 2))
+            for future in as_completed(futures):
+                url = futures[future]
+                try:
+                    success = future.result()
+                    if success:
+                        success_count += 1
+                    self.tracker.update(success=success)
+                except Exception as e:
+                    logger.error(f"Future error for {url}: {e}")
+                    self.tracker.update(success=False)
         
         if len(subtitle_urls) > 0:
             self.tracker.stop()
