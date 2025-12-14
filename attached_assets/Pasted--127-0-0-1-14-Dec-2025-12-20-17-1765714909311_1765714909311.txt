@@ -1,0 +1,38 @@
+==> ///////////////////////////////////////////////////////////
+127.0.0.1 - - [14/Dec/2025:12:20:17 +0000] "GET / HTTP/1.1" 200 15 "-" "Go-http-client/2.0"
+2025-12-14 12:20:20,937 - INFO - Found 55 unique subtitle links on page 1 (Total: 55)
+2025-12-14 12:20:25,091 - INFO - Fetching subtitle list page 2
+2025-12-14 12:20:25,091 - INFO - Fetching https://www.baiscope.lk/subtitles/page/2/ (attempt 1, browser: chrome110)
+2025-12-14 12:20:29,931 - INFO - Found 0 unique subtitle links on page 2 (Total: 55)
+2025-12-14 12:20:33,347 - INFO - Fetching subtitle list page 3
+2025-12-14 12:20:33,347 - INFO - Fetching https://www.baiscope.lk/subtitles/page/3/ (attempt 1, browser: chrome124)
+2025-12-14 12:20:33,394 - WARNING - Attempt 1 failed: HTTP Error 403: 
+2025-12-14 12:20:41,992 - INFO - Fetching https://www.baiscope.lk/subtitles/page/3/ (attempt 2, browser: chrome110)
+2025-12-14 12:20:47,842 - INFO - Found 0 unique subtitle links on page 3 (Total: 55)
+2025-12-14 12:20:52,880 - INFO - Fetching subtitle list page 4
+2025-12-14 12:20:52,880 - INFO - Fetching https://www.baiscope.lk/subtitles/page/4/ (attempt 1, browser: chrome120)
+2025-12-14 12:20:52,916 - WARNING - Attempt 1 failed: HTTP Error 403: 
+2025-12-14 12:20:59,991 - INFO - Fetching https://www.baiscope.lk/subtitles/page/4/ (attempt 2, browser: chrome110)
+2025-12-14 12:21:05,030 - INFO - Found 0 unique subtitle links on page 4 (Total: 55)
+2025-12-14 12:21:05,030 - INFO - 3 consecutive empty pages, stopping at page 4
+2025-12-14 12:21:05,030 - INFO - Total subtitle pages found: 55
+2025-12-14 12:21:05,860 - INFO - Processing 1/55: https://www.baiscope.lk/record-of-ragnarok-s03-e01-sinhala-subtitles/
+2025-12-14 12:21:05,860 - INFO - Processing: https://www.baiscope.lk/record-of-ragnarok-s03-e01-sinhala-subtitles/
+2025-12-14 12:21:05,860 - INFO - Fetching https://www.baiscope.lk/record-of-ragnarok-s03-e01-sinhala-subtitles/ (attempt 1, browser: chrome116)
+2025-12-14 12:21:09,643 - INFO - Found download manager link: https://www.baiscope.lk/Downloads/269928/?tmstv=1765714866
+2025-12-14 12:21:09,643 - INFO - Downloading from: https://www.baiscope.lk/Downloads/269928/?tmstv=1765714866
+2025-12-14 12:21:09,643 - INFO - Fetching https://www.baiscope.lk/Downloads/269928/?tmstv=1765714866 (attempt 1, browser: chrome116)
+2025-12-14 12:21:13,018 - INFO - Extracting: Record-of-Ragnarok-S03-E01/Record of Ragnarok S03E01 2025 1080p NF WEBRip Dual Audio 10bits x265-Rapta.srt
+2025-12-14 12:21:13,716 - INFO - Uploaded to R2: subtitles/Record_of_Ragnarok_S03_E01_Sinhala_Subtitles__මතකවරජනය_සහල_උපසරස/Record-of-Ragnarok-S03-E01/Record of Ragnarok S03E01 2025 1080p NF WEBRip Dual Audio 10bits x265-Rapta.srt
+2025-12-14 12:21:13,718 - INFO - Uploaded 1/1 SRT files to R2
+2025-12-14 12:21:19,709 - INFO - Processing 2/55: https://www.baiscope.lk/kuttram-purindhavan-the-guilty-one-s01-e03-sinhala-subtitles/
+2025-12-14 12:21:19,709 - INFO - Processing: https://www.baiscope.lk/kuttram-purindhavan-the-guilty-one-s01-e03-sinhala-subtitles/
+2025-12-14 12:21:19,709 - INFO - Fetching https://www.baiscope.lk/kuttram-purindhavan-the-guilty-one-s01-e03-sinhala-subtitles/ (attempt 1, browser: chrome110)
+2025-12-14 12:21:24,440 - INFO - Found download manager link: https://www.baiscope.lk/Downloads/269922/?tmstv=1765701034
+2025-12-14 12:21:24,440 - INFO - Downloading from: https://www.baiscope.lk/Downloads/269922/?tmstv=1765701034
+2025-12-14 12:21:24,440 - INFO - Fetching https://www.baiscope.lk/Downloads/269922/?tmstv=1765701034 (attempt 1, browser: chrome110)
+2025-12-14 12:21:28,236 - INFO - Extracting: Kuttram Purindhavan (2025) S01EP03/Kuttram Purindhavan (2025) S01 EP03.srt
+2025-12-14 12:21:28,238 - INFO - Extracting: Kuttram Purindhavan (2025) S01EP03/Kuttram Purindhavan (2025) S01 EP03_Eng.srt
+2025-12-14 12:21:28,874 - INFO - Uploaded to R2: subtitles/Kuttram_Purindhavan_The_Guilty_One_S01_E03_Sinhala_Subtitles__බය_සක_මද_තවත_දවසක_සහල_උපසරස/Kuttram Purindhavan (2025) S01EP03/Kuttram Purindhavan (2025) S01 EP03.srt
+2025-12-14 12:21:29,999 - INFO - Uploaded to R2: subtitles/Kuttram_Purindhavan_The_Guilty_One_S01_E03_Sinhala_Subtitles__බය_සක_මද_තවත_දවසක_සහල_උපසරස/Kuttram Purindhavan (2025) S01EP03/Kuttram Purindhavan (2025) S01 EP03_Eng.srt
+2025-12-14 12:21:29,999 - INFO - Uploaded 2/2 SRT files to R2

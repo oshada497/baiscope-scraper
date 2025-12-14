@@ -170,56 +170,87 @@ class BaiscopeScraperAdvanced:
                     return None
     
     def get_all_subtitle_pages(self):
-        subtitle_urls = []
-        page = 1
-        max_pages = 2000
-        consecutive_empty = 0
+        subtitle_urls = set()
         
-        while page <= max_pages:
-            if page == 1:
-                url = f"{self.base_url}/subtitles/"
-            else:
-                url = f"{self.base_url}/subtitles/page/{page}/"
+        categories = [
+            "/category/sinhala-subtitles/movies/",
+            "/category/sinhala-subtitles/",
+            "/category/anime/",
+            "/category/war/",
+            "/category/crime/",
+            "/category/action/",
+            "/category/adventure/",
+            "/category/comedy/",
+            "/category/drama/",
+            "/category/fantasy/",
+            "/category/horror/",
+            "/category/mystery/",
+            "/category/romance/",
+            "/category/sci-fi/",
+            "/category/thriller/",
+            "/category/animation/",
+            "/category/biography/",
+            "/category/family/",
+            "/category/history/",
+            "/category/music/",
+            "/category/sport/",
+            "/category/western/",
+            "/category/documentary/",
+            "/category/tv-series/",
+            "/category/hindi-subtitles/",
+            "/category/korean-subtitles/",
+            "/category/tamil-subtitles/",
+        ]
+        
+        for category in categories:
+            page = 1
+            max_pages = 500
+            consecutive_empty = 0
             
-            logger.info(f"Fetching subtitle list page {page}")
-            response = self.get_page(url)
-            
-            if not response:
-                consecutive_empty += 1
-                if consecutive_empty >= 3:
-                    break
+            while page <= max_pages:
+                if page == 1:
+                    url = f"{self.base_url}{category}"
+                else:
+                    url = f"{self.base_url}{category}page/{page}/"
+                
+                logger.info(f"Fetching {category} page {page}")
+                response = self.get_page(url)
+                
+                if not response:
+                    consecutive_empty += 1
+                    if consecutive_empty >= 2:
+                        break
+                    page += 1
+                    continue
+                
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                all_links = soup.find_all('a', href=True)
+                found_on_page = 0
+                
+                for link in all_links:
+                    href = link.get('href', '')
+                    if ('sinhala-subtitle' in href.lower() or 'subtitles' in href.lower()) and '/category/' not in href and '/tag/' not in href:
+                        full_url = href if href.startswith('http') else urljoin(self.base_url, href)
+                        if full_url not in subtitle_urls and 'baiscope.lk' in full_url and full_url != self.base_url + '/':
+                            subtitle_urls.add(full_url)
+                            found_on_page += 1
+                
+                logger.info(f"Found {found_on_page} new links on {category} page {page} (Total: {len(subtitle_urls)})")
+                
+                if found_on_page == 0:
+                    consecutive_empty += 1
+                    if consecutive_empty >= 2:
+                        logger.info(f"No more content in {category}")
+                        break
+                else:
+                    consecutive_empty = 0
+                
                 page += 1
-                continue
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            all_links = soup.find_all('a', href=True)
-            found_on_page = 0
-            
-            for link in all_links:
-                href = link.get('href', '')
-                if ('-sinhala-subtitles' in href or '-sinhala-subtitle' in href) and '/category/' not in href and '/tag/' not in href:
-                    full_url = href if href.startswith('http') else urljoin(self.base_url, href)
-                    if full_url not in subtitle_urls and 'baiscope.lk' in full_url:
-                        subtitle_urls.append(full_url)
-                        found_on_page += 1
-            
-            logger.info(f"Found {found_on_page} unique subtitle links on page {page} (Total: {len(subtitle_urls)})")
-            
-            if found_on_page == 0:
-                consecutive_empty += 1
-                if consecutive_empty >= 3:
-                    logger.info(f"3 consecutive empty pages, stopping at page {page}")
-                    break
-            else:
-                consecutive_empty = 0
-            
-            page += 1
-            
-            time.sleep(random.uniform(1, 2))
+                time.sleep(random.uniform(0.5, 1))
         
         logger.info(f"Total subtitle pages found: {len(subtitle_urls)}")
-        return subtitle_urls
+        return list(subtitle_urls)
     
     def extract_srt_from_zip(self, zip_content):
         srt_files = {}
