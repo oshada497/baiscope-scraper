@@ -26,19 +26,9 @@ class BaiscopeScraperAdvanced:
             r2_secret_key: R2 secret key
             r2_bucket_name: R2 bucket name
         """
-        self.base_url = 'https://baiscope.lk'
+        self.base_url = 'https://www.baiscope.lk'
         
-        # Create cloudscraper session (bypasses Cloudflare)
-        self.scraper = cloudscraper.create_scraper(
-            browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'mobile': False
-            },
-            delay=10  # Initial delay for first visit
-        )
-        
-        # Setup R2 client
+        # Setup R2 client FIRST
         self.s3_client = boto3.client(
             's3',
             endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
@@ -50,6 +40,9 @@ class BaiscopeScraperAdvanced:
         
         # Ensure bucket exists
         self._ensure_bucket_exists()
+        
+        # Create cloudscraper session AFTER R2 setup (bypasses Cloudflare)
+        self.scraper = None  # Will be initialized on first use
         
         # User agents for rotation
         self.user_agents = [
@@ -73,7 +66,8 @@ class BaiscopeScraperAdvanced:
     
     def _rotate_user_agent(self):
         """Rotate user agent to appear more human-like"""
-        self.scraper.headers.update({
+        scraper = self._get_scraper()
+        scraper.headers.update({
             'User-Agent': random.choice(self.user_agents),
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
@@ -83,13 +77,21 @@ class BaiscopeScraperAdvanced:
             'Upgrade-Insecure-Requests': '1'
         })
     
+    def _get_scraper(self):
+        """Lazy initialization of cloudscraper to avoid conflicts with boto3"""
+        if self.scraper is None:
+            logger.info("Initializing cloudscraper...")
+            self.scraper = cloudscraper.create_scraper()
+        return self.scraper
+    
     def get_page(self, url, retries=3):
         """Fetch a page with Cloudflare bypass and retry logic"""
+        scraper = self._get_scraper()
         for attempt in range(retries):
             try:
-                self._rotate_user_agent()
+                # Don't rotate user agent - it breaks cloudscraper's Cloudflare bypass
                 logger.info(f"Fetching {url} (attempt {attempt + 1})")
-                response = self.scraper.get(url, timeout=30)
+                response = scraper.get(url, timeout=30)
                 response.raise_for_status()
                 
                 # Random delay between requests (2-5 seconds)
@@ -107,9 +109,10 @@ class BaiscopeScraperAdvanced:
         """Get all subtitle listing pages"""
         subtitle_urls = []
         page = 1
+        max_pages = 50  # Limit pages for safety
         
-        while True:
-            # Construct page URL
+        while page <= max_pages:
+            # The site uses /subtitles/ as main listing page
             if page == 1:
                 url = f"{self.base_url}/subtitles/"
             else:
@@ -123,39 +126,34 @@ class BaiscopeScraperAdvanced:
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Find all subtitle post links
-            # Adjust these selectors based on actual site structure
-            post_links = []
+            # Find all links - the site uses Elementor and posts end with -sinhala-subtitles/
+            all_links = soup.find_all('a', href=True)
+            found_on_page = 0
             
-            # Try multiple selector patterns
-            for selector in [
-                'article a[href*="/subtitles/"]',
-                '.post a[href*="/subtitles/"]',
-                'h2 a[href*="/subtitles/"]',
-                'a[href*="/subtitles/"][href*="-sinhala-"]'
-            ]:
-                links = soup.select(selector)
-                if links:
-                    post_links.extend(links)
-                    break
+            for link in all_links:
+                href = link.get('href', '')
+                # Look for actual subtitle post URLs (not categories)
+                if '-sinhala-subtitles' in href and '/category/' not in href:
+                    full_url = href if href.startswith('http') else urljoin(self.base_url, href)
+                    if full_url not in subtitle_urls:
+                        subtitle_urls.append(full_url)
+                        found_on_page += 1
             
-            if not post_links:
+            logger.info(f"Found {found_on_page} unique subtitle links on page {page}")
+            
+            if found_on_page == 0:
                 logger.warning(f"No subtitle links found on page {page}")
                 break
             
-            # Extract unique URLs
-            for link in post_links:
-                href = link.get('href')
-                if href and '/subtitles/' in href:
-                    full_url = urljoin(self.base_url, href)
-                    if full_url not in subtitle_urls and full_url != url:
-                        subtitle_urls.append(full_url)
-            
-            logger.info(f"Found {len(post_links)} links on page {page}")
-            
-            # Check for next page button
-            next_btn = soup.find('a', class_='next') or soup.find('link', rel='next')
+            # Check for next page - look for pagination links
+            next_page_url = f"{self.base_url}/subtitles/page/{page + 1}/"
+            next_btn = soup.find('a', href=next_page_url)
             if not next_btn:
+                # Also check for 'next' class
+                next_btn = soup.find('a', class_='next')
+            
+            if not next_btn:
+                logger.info("No more pages found")
                 break
             
             page += 1
@@ -221,25 +219,41 @@ class BaiscopeScraperAdvanced:
         movie_title = soup.find('h1')
         title_text = movie_title.get_text(strip=True) if movie_title else 'Unknown'
         
-        # Find download link - try multiple patterns
+        # Find download link - look for actual file URLs first
         download_link = None
         
-        # Pattern 1: Direct download buttons
+        # Pattern 1: Look for direct file links (.zip, .srt, .rar)
         for link in soup.find_all('a', href=True):
             href = link['href']
-            text = link.get_text(strip=True).lower()
-            
-            if any(keyword in text for keyword in ['download', 'get subtitle', 'සිංහල']):
-                download_link = href
-                break
-            
-            # Pattern 2: Direct file links
             if any(ext in href.lower() for ext in ['.zip', '.srt', '.rar']):
                 download_link = href
+                logger.info(f"Found direct file link: {href[:80]}")
                 break
         
+        # Pattern 2: Look for download manager links (download.php, ?download=)
         if not download_link:
-            logger.warning(f"No download link found on {subtitle_url}")
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                if 'download' in href.lower() and ('?' in href or '.php' in href):
+                    download_link = href
+                    logger.info(f"Found download manager link: {href[:80]}")
+                    break
+        
+        # Pattern 3: Look for buttons with download text that contain file URLs
+        if not download_link:
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                text = link.get_text(strip=True).lower()
+                # Skip generic redirect domains
+                if 'baiscopedownloads.link' in href:
+                    continue
+                if any(keyword in text for keyword in ['download subtitle', 'get subtitle', '.srt', '.zip']):
+                    download_link = href
+                    logger.info(f"Found download button: {href[:80]}")
+                    break
+        
+        if not download_link:
+            logger.warning(f"No valid download link found on {subtitle_url}")
             return False
         
         # Download the file
@@ -271,7 +285,7 @@ class BaiscopeScraperAdvanced:
                 
                 metadata = {
                     'source_url': subtitle_url,
-                    'movie_title': title_text,
+                    'movie_title': title_text.encode('ascii', 'ignore').decode('ascii'),
                     'download_date': time.strftime('%Y-%m-%d')
                 }
                 
