@@ -115,6 +115,7 @@ class BaiscopeScraperAdvanced:
         self.base_url = 'https://www.baiscope.lk'
         self.batch_size = batch_size
         self.state_file = 'scraper_state/progress.json'
+        self.urls_file = 'scraper_state/discovered_urls.json'
         
         self.s3_client = boto3.client(
             's3',
@@ -196,6 +197,39 @@ class BaiscopeScraperAdvanced:
             logger.info(f"Saved state: {len(self.processed_urls)} processed URLs")
         except Exception as e:
             logger.error(f"Error saving state: {e}")
+    
+    def _load_discovered_urls(self):
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=self.urls_file)
+            data = json.loads(response['Body'].read().decode('utf-8'))
+            urls = data.get('urls', [])
+            discovered_at = data.get('discovered_at', 'unknown')
+            logger.info(f"Loaded {len(urls)} discovered URLs from R2 (discovered: {discovered_at})")
+            return urls
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                logger.info("No discovered URLs cache found")
+            return None
+        except Exception as e:
+            logger.warning(f"Error loading discovered URLs: {e}")
+            return None
+    
+    def _save_discovered_urls(self, urls):
+        try:
+            data = {
+                'urls': urls,
+                'count': len(urls),
+                'discovered_at': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            self.s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=self.urls_file,
+                Body=json.dumps(data),
+                ContentType='application/json'
+            )
+            logger.info(f"Saved {len(urls)} discovered URLs to R2")
+        except Exception as e:
+            logger.error(f"Error saving discovered URLs: {e}")
     
     def get_page(self, url, retries=4):
         for attempt in range(retries):
@@ -443,12 +477,27 @@ class BaiscopeScraperAdvanced:
             logger.error(f"Error processing subtitle: {e}")
             return False
     
-    def scrape_all(self, limit=None, workers=3):
+    def scrape_all(self, limit=None, workers=3, force_recrawl=False):
         logger.info("Starting Baiscope.lk subtitle scraper with curl_cffi browser impersonation...")
         logger.info(f"Using {workers} parallel workers, batch size: {self.batch_size}")
         logger.info(f"Previously processed URLs: {len(self.processed_urls)}")
         
-        subtitle_urls = self.get_all_subtitle_pages()
+        cached_urls = None if force_recrawl else self._load_discovered_urls()
+        
+        if cached_urls and len(cached_urls) > 0:
+            subtitle_urls = cached_urls
+            logger.info(f"Using {len(subtitle_urls)} cached URLs (skipping crawl)")
+            self.notifier.send_message(
+                f"<b>Scraper Resumed</b>\n"
+                f"Using cached URLs: {len(subtitle_urls)}\n"
+                f"Already processed: {len(self.processed_urls)}"
+            )
+        else:
+            logger.info("No cached URLs found, crawling all categories...")
+            self.notifier.send_message("<b>Scraper Starting</b>\nCrawling all categories to find subtitles...")
+            subtitle_urls = self.get_all_subtitle_pages()
+            self._save_discovered_urls(subtitle_urls)
+            self.notifier.send_message(f"<b>Crawl Complete</b>\nDiscovered {len(subtitle_urls)} subtitle URLs")
         
         new_urls = [url for url in subtitle_urls if url not in self.processed_urls]
         skipped_count = len(subtitle_urls) - len(new_urls)
