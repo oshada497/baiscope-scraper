@@ -199,11 +199,21 @@ class TelegramChannelSync:
         existing_files = self.d1.get_all_normalized_filenames()
         logger.info(f"Found {len(existing_files)} existing files in D1")
         
+        # Get channel entity - use username for public channels
+        try:
+            # Try username first (works for public channels)
+            channel = await self.client.get_entity("SinhalaSubtitles_Rezoth")
+            logger.info(f"Found channel: {channel.title}")
+        except Exception as e:
+            logger.warning(f"Could not get channel by username: {e}")
+            # Fall back to numeric ID
+            channel = self.chat_id
+        
         batch = []
         batch_size = 100
         total_messages = 0
         
-        async for message in self.client.iter_messages(self.chat_id, limit=limit, offset_id=offset_id):
+        async for message in self.client.iter_messages(channel, limit=limit, offset_id=offset_id):
             total_messages += 1
             
             if message.document:
