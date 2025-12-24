@@ -354,8 +354,14 @@ class TelegramUploader:
             try:
                 url = f"{self.base_url}/sendDocument"
                 
+                mime_type = 'application/x-subrip'
+                if filename.lower().endswith('.zip'):
+                    mime_type = 'application/zip'
+                elif filename.lower().endswith('.rar'):
+                    mime_type = 'application/x-rar-compressed'
+                
                 files = {
-                    'document': (filename, io.BytesIO(file_content), 'application/x-subrip')
+                    'document': (filename, io.BytesIO(file_content), mime_type)
                 }
                 data = {
                     'chat_id': self.chat_id
@@ -652,24 +658,7 @@ class BaiscopeScraperTelegram:
                     return None
         return None
     
-    def extract_srt_from_zip(self, zip_content):
-        srt_files = {}
-        
-        try:
-            with zipfile.ZipFile(io.BytesIO(zip_content)) as zip_file:
-                for file_info in zip_file.filelist:
-                    if file_info.filename.lower().endswith('.srt'):
-                        logger.info(f"Extracting: {file_info.filename}")
-                        srt_content = zip_file.read(file_info.filename)
-                        srt_files[file_info.filename] = srt_content
-        except zipfile.BadZipFile:
-            logger.warning("Not a valid ZIP file, might be direct SRT")
-            if zip_content[:3] == b'\xef\xbb\xbf' or b'-->' in zip_content[:500]:
-                srt_files['subtitle.srt'] = zip_content
-        except Exception as e:
-            logger.error(f"Error extracting ZIP: {e}")
-        
-        return srt_files
+
     
     def download_and_process_subtitle(self, subtitle_url):
         logger.info(f"Processing: {subtitle_url}")
@@ -725,52 +714,54 @@ class BaiscopeScraperTelegram:
             
             file_content = file_response.content
             
-            srt_files = self.extract_srt_from_zip(file_content)
+            # Check if likely a zip file
+            is_zip = False
+            if file_content[:4] == b'PK\x03\x04':
+                is_zip = True
             
-            if not srt_files:
-                logger.warning("No SRT files found")
-                return False, title_text
+            clean_title = ''.join(c for c in title_text if c.isalnum() or c in (' ', '-', '_', '.'))
+            clean_title = clean_title.strip()[:80]
             
-            success_count = 0
-            for srt_filename, srt_content in srt_files.items():
-                clean_title = ''.join(c for c in title_text if c.isalnum() or c in (' ', '-', '_', '.'))
-                clean_title = clean_title.strip()[:80]
+            # Prepare filename
+            if is_zip:
+                ext = '.zip'
+            else:
+                ext = '.srt'
                 
-                final_filename = f"{clean_title}_{srt_filename}" if clean_title else srt_filename
-                final_filename = final_filename.replace('/', '_').replace('\\', '_')
-                
-                normalized = normalize_filename(final_filename)
-                with self.lock:
-                    if self.d1.enabled and normalized in self.existing_filenames:
-                        logger.info(f"SKIPPING (already exists in Telegram): {final_filename}")
-                        success_count += 1
-                        continue
-                
-                caption = f"<b>{title_text[:200]}</b>\n\nSource: {subtitle_url[:100]}"
-                
-                file_info = self.telegram.send_document(srt_content, final_filename, caption)
-                if file_info:
-                    success_count += 1
-                    
-                    if self.d1.enabled and file_info.get('file_id'):
-                        self.d1.save_telegram_file_with_normalized(
-                            file_id=file_info['file_id'],
-                            file_unique_id=file_info.get('file_unique_id', ''),
-                            filename=final_filename,
-                            normalized_filename=normalized,
-                            file_size=file_info.get('file_size', 0),
-                            title=title_text,
-                            source_url=subtitle_url,
-                            category=self.current_category,
-                            message_id=file_info.get('message_id', 0)
-                        )
-                        with self.lock:
-                            self.existing_filenames.add(normalized)
-                    
-                    time.sleep(random.uniform(0.2, 0.5))
+            final_filename = f"{clean_title}{ext}"
+            final_filename = final_filename.replace('/', '_').replace('\\', '_')
             
-            logger.info(f"Uploaded {success_count}/{len(srt_files)} SRT files to Telegram")
-            return success_count > 0, title_text
+            normalized = normalize_filename(final_filename)
+            
+            with self.lock:
+                if self.d1.enabled and normalized in self.existing_filenames:
+                    logger.info(f"SKIPPING (already exists in Telegram): {final_filename}")
+                    return True, title_text
+
+            caption = f"<b>{title_text[:200]}</b>\n\nSource: {subtitle_url[:100]}"
+            
+            file_info = self.telegram.send_document(file_content, final_filename, caption)
+            
+            if file_info:
+                if self.d1.enabled and file_info.get('file_id'):
+                    self.d1.save_telegram_file_with_normalized(
+                        file_id=file_info['file_id'],
+                        file_unique_id=file_info.get('file_unique_id', ''),
+                        filename=final_filename,
+                        normalized_filename=normalized,
+                        file_size=file_info.get('file_size', 0),
+                        title=title_text,
+                        source_url=subtitle_url,
+                        category=self.current_category,
+                        message_id=file_info.get('message_id', 0)
+                    )
+                    with self.lock:
+                        self.existing_filenames.add(normalized)
+                
+                logger.info(f"Uploaded to Telegram: {final_filename}")
+                return True, title_text
+            
+            return False, title_text
             
         except Exception as e:
             logger.error(f"Error processing subtitle: {e}")
