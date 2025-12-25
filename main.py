@@ -21,6 +21,23 @@ if TELEGRAM_TOKEN:
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
+SUBTITLE_EXTENSIONS = {'.zip', '.srt', '.rar', '.7z'}
+VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.m3u8', '.ts', '.m2ts', '.mts'}
+
+def is_subtitle_file(url):
+    """Check if URL is a subtitle file"""
+    if not isinstance(url, str):
+        return False
+    url_lower = url.lower()
+    return any(url_lower.endswith(ext) for ext in SUBTITLE_EXTENSIONS)
+
+def is_video_file(url):
+    """Check if URL is a video file"""
+    if not isinstance(url, str):
+        return False
+    url_lower = url.lower()
+    return any(url_lower.endswith(ext) for ext in VIDEO_EXTENSIONS)
+
 def scrape_biscope():
     """Scrape biscope.lk for subtitle files"""
     logger.info("Starting biscope.lk scrape...")
@@ -59,11 +76,10 @@ def scrape_subz():
         items = soup.find_all('a', class_='card-link')
         
         for item in items[:5]:
-            title = item.get('title', '').strip()
-            if not title:
-                title = item.text.strip()
+            title_attr = item.get('title')
+            title = title_attr.strip() if title_attr else item.text.strip()
             link = item.get('href')
-            if link and title:
+            if link and title and isinstance(link, str):
                 process_subz_download(link, title)
                 
     except Exception as e:
@@ -98,7 +114,7 @@ def scrape_zoom():
         logger.error(f"Zoom scrape error: {e}")
 
 def process_biscope_download(url, title):
-    """Process biscope.lk download page"""
+    """Process biscope.lk download page - only subtitle files"""
     try:
         logger.info(f"Processing biscope: {title}")
         response = requests.get(url, timeout=15, allow_redirects=True)
@@ -106,29 +122,25 @@ def process_biscope_download(url, title):
         
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        zip_file = None
-        srt_file = None
+        subtitle_file = None
         
         for link in soup.find_all('a', href=True):
             href = link.get('href')
-            if isinstance(href, str):
-                if href.endswith('.zip'):
-                    zip_file = href
-                elif href.endswith('.srt'):
-                    srt_file = href
+            if is_subtitle_file(href) and not is_video_file(href):
+                subtitle_file = href
+                break
         
-        if zip_file:
-            upload_file_to_telegram(zip_file, "biscope.lk", title, "zip")
-        elif srt_file:
-            upload_file_to_telegram(srt_file, "biscope.lk", title, "srt")
+        if subtitle_file:
+            file_ext = subtitle_file.lower().split('.')[-1]
+            upload_file_to_telegram(subtitle_file, "biscope.lk", title, file_ext)
         else:
-            logger.warning(f"No ZIP or SRT file found for biscope: {title}")
+            logger.warning(f"No subtitle file found for biscope: {title}")
             
     except Exception as e:
         logger.error(f"Error processing biscope {title}: {e}")
 
 def process_subz_download(url, title):
-    """Process subz.lk download page - uses AJAX endpoints"""
+    """Process subz.lk download page - only subtitle files, skip videos"""
     try:
         logger.info(f"Processing subz: {title}")
         response = requests.get(url, timeout=15, allow_redirects=True)
@@ -140,28 +152,25 @@ def process_subz_download(url, title):
         download_link = soup.find('a', class_='sub-download')
         if download_link:
             href = download_link.get('href')
-            if href:
+            if href and is_subtitle_file(href) and not is_video_file(href):
                 upload_file_to_telegram(href, "subz.lk", title, "zip")
                 return
         
-        # Fallback: look for direct file links
+        # Fallback: look for direct subtitle file links only
         for link in soup.find_all('a', href=True):
             href = link.get('href')
-            if isinstance(href, str):
-                if href.endswith('.zip'):
-                    upload_file_to_telegram(href, "subz.lk", title, "zip")
-                    return
-                elif href.endswith('.srt'):
-                    upload_file_to_telegram(href, "subz.lk", title, "srt")
-                    return
+            if is_subtitle_file(href) and not is_video_file(href):
+                file_ext = href.lower().split('.')[-1]
+                upload_file_to_telegram(href, "subz.lk", title, file_ext)
+                return
         
-        logger.warning(f"No download link found for subz: {title}")
+        logger.warning(f"No subtitle file found for subz: {title}")
             
     except Exception as e:
         logger.error(f"Error processing subz {title}: {e}")
 
 def process_zoom_download(url, title):
-    """Process zoom.lk download page"""
+    """Process zoom.lk download page - only subtitle files, skip videos"""
     try:
         logger.info(f"Processing zoom: {title}")
         response = requests.get(url, timeout=15, allow_redirects=True)
@@ -169,27 +178,25 @@ def process_zoom_download(url, title):
         
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Look for download monitor links (dlm plugin)
+        # Look for download monitor links (dlm plugin) - only subtitles
         download_links = soup.find_all('a', class_='dlm-link')
         if download_links:
-            for link in download_links[:1]:
+            for link in download_links:
                 href = link.get('href')
-                if href:
-                    upload_file_to_telegram(href, "zoom.lk", title, "zip")
+                if href and is_subtitle_file(href) and not is_video_file(href):
+                    file_ext = href.lower().split('.')[-1]
+                    upload_file_to_telegram(href, "zoom.lk", title, file_ext)
                     return
         
-        # Fallback: look for direct file links
+        # Fallback: look for direct subtitle file links only
         for link in soup.find_all('a', href=True):
             href = link.get('href')
-            if isinstance(href, str):
-                if href.endswith('.zip'):
-                    upload_file_to_telegram(href, "zoom.lk", title, "zip")
-                    return
-                elif href.endswith('.srt'):
-                    upload_file_to_telegram(href, "zoom.lk", title, "srt")
-                    return
+            if is_subtitle_file(href) and not is_video_file(href):
+                file_ext = href.lower().split('.')[-1]
+                upload_file_to_telegram(href, "zoom.lk", title, file_ext)
+                return
         
-        logger.warning(f"No download link found for zoom: {title}")
+        logger.warning(f"No subtitle file found for zoom: {title}")
             
     except Exception as e:
         logger.error(f"Error processing zoom {title}: {e}")
