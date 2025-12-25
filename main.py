@@ -39,13 +39,13 @@ def scrape_biscope():
             title = item.text.strip()
             link = item.get('href')
             if link:
-                process_download(link, "biscope.lk", title)
+                process_biscope_download(link, title)
                 
     except Exception as e:
         logger.error(f"Biscope scrape error: {e}")
 
 def scrape_subz():
-    """Scrape subz.lk for subtitle files"""
+    """Scrape subz.lk for subtitle files using card-link class"""
     logger.info("Starting subz.lk scrape...")
     try:
         url = "https://subz.lk/"
@@ -56,13 +56,15 @@ def scrape_subz():
         response.raise_for_status()
         
         soup = BeautifulSoup(response.content, 'html.parser')
-        items = soup.find_all('a', class_='entry-title-link')
+        items = soup.find_all('a', class_='card-link')
         
         for item in items[:5]:
-            title = item.text.strip()
+            title = item.get('title', '').strip()
+            if not title:
+                title = item.text.strip()
             link = item.get('href')
-            if link:
-                process_download(link, "subz.lk", title)
+            if link and title:
+                process_subz_download(link, title)
                 
     except Exception as e:
         logger.error(f"Subz scrape error: {e}")
@@ -79,21 +81,26 @@ def scrape_zoom():
         response.raise_for_status()
         
         soup = BeautifulSoup(response.content, 'html.parser')
-        items = soup.find_all('a', class_='post-link')
+        items = soup.find_all('a', href=True)
         
-        for item in items[:5]:
-            title = item.text.strip()
-            link = item.get('href')
-            if link:
-                process_download(link, "zoom.lk", title)
+        links_found = []
+        for item in items:
+            href = item.get('href')
+            if href and 'zoom.lk' in href and ('/20' in href or '/subtitle' in href):
+                title = item.text.strip()
+                if title and title not in [l[1] for l in links_found]:
+                    links_found.append((href, title))
+        
+        for link, title in links_found[:5]:
+            process_zoom_download(link, title)
                 
     except Exception as e:
         logger.error(f"Zoom scrape error: {e}")
 
-def process_download(url, source, title):
-    """Download files from subtitle page and upload to Telegram"""
+def process_biscope_download(url, title):
+    """Process biscope.lk download page"""
     try:
-        logger.info(f"Processing: {title} from {source}")
+        logger.info(f"Processing biscope: {title}")
         response = requests.get(url, timeout=15, allow_redirects=True)
         response.raise_for_status()
         
@@ -111,14 +118,81 @@ def process_download(url, source, title):
                     srt_file = href
         
         if zip_file:
-            upload_file_to_telegram(zip_file, source, title, "zip")
+            upload_file_to_telegram(zip_file, "biscope.lk", title, "zip")
         elif srt_file:
-            upload_file_to_telegram(srt_file, source, title, "srt")
+            upload_file_to_telegram(srt_file, "biscope.lk", title, "srt")
         else:
-            logger.warning(f"No ZIP or SRT file found for {title}")
+            logger.warning(f"No ZIP or SRT file found for biscope: {title}")
             
     except Exception as e:
-        logger.error(f"Error processing {title}: {e}")
+        logger.error(f"Error processing biscope {title}: {e}")
+
+def process_subz_download(url, title):
+    """Process subz.lk download page - uses AJAX endpoints"""
+    try:
+        logger.info(f"Processing subz: {title}")
+        response = requests.get(url, timeout=15, allow_redirects=True)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Try to find download button with sub_id and nonce
+        download_link = soup.find('a', class_='sub-download')
+        if download_link:
+            href = download_link.get('href')
+            if href:
+                upload_file_to_telegram(href, "subz.lk", title, "zip")
+                return
+        
+        # Fallback: look for direct file links
+        for link in soup.find_all('a', href=True):
+            href = link.get('href')
+            if isinstance(href, str):
+                if href.endswith('.zip'):
+                    upload_file_to_telegram(href, "subz.lk", title, "zip")
+                    return
+                elif href.endswith('.srt'):
+                    upload_file_to_telegram(href, "subz.lk", title, "srt")
+                    return
+        
+        logger.warning(f"No download link found for subz: {title}")
+            
+    except Exception as e:
+        logger.error(f"Error processing subz {title}: {e}")
+
+def process_zoom_download(url, title):
+    """Process zoom.lk download page"""
+    try:
+        logger.info(f"Processing zoom: {title}")
+        response = requests.get(url, timeout=15, allow_redirects=True)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Look for download monitor links (dlm plugin)
+        download_links = soup.find_all('a', class_='dlm-link')
+        if download_links:
+            for link in download_links[:1]:
+                href = link.get('href')
+                if href:
+                    upload_file_to_telegram(href, "zoom.lk", title, "zip")
+                    return
+        
+        # Fallback: look for direct file links
+        for link in soup.find_all('a', href=True):
+            href = link.get('href')
+            if isinstance(href, str):
+                if href.endswith('.zip'):
+                    upload_file_to_telegram(href, "zoom.lk", title, "zip")
+                    return
+                elif href.endswith('.srt'):
+                    upload_file_to_telegram(href, "zoom.lk", title, "srt")
+                    return
+        
+        logger.warning(f"No download link found for zoom: {title}")
+            
+    except Exception as e:
+        logger.error(f"Error processing zoom {title}: {e}")
 
 def upload_file_to_telegram(file_url, source, title, file_type):
     """Download and upload file to Telegram"""
