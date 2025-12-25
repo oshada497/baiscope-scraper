@@ -7,9 +7,12 @@ from bs4 import BeautifulSoup
 from telebot import TeleBot
 import time
 import logging
+from database import init_database, is_already_processed, add_processed_subtitle, get_processed_count
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+init_database()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -77,7 +80,7 @@ def scrape_subz():
         
         for item in items[:5]:
             title_attr = item.get('title')
-            title = title_attr.strip() if title_attr else item.text.strip()
+            title = (title_attr.strip() if isinstance(title_attr, str) else '') or (item.text.strip() if isinstance(item.text, str) else '')
             link = item.get('href')
             if link and title and isinstance(link, str):
                 process_subz_download(link, title)
@@ -126,7 +129,7 @@ def process_biscope_download(url, title):
         
         for link in soup.find_all('a', href=True):
             href = link.get('href')
-            if is_subtitle_file(href) and not is_video_file(href):
+            if isinstance(href, str) and is_subtitle_file(href) and not is_video_file(href):
                 subtitle_file = href
                 break
         
@@ -159,7 +162,7 @@ def process_subz_download(url, title):
         # Fallback: look for direct subtitle file links only
         for link in soup.find_all('a', href=True):
             href = link.get('href')
-            if is_subtitle_file(href) and not is_video_file(href):
+            if isinstance(href, str) and is_subtitle_file(href) and not is_video_file(href):
                 file_ext = href.lower().split('.')[-1]
                 upload_file_to_telegram(href, "subz.lk", title, file_ext)
                 return
@@ -183,7 +186,7 @@ def process_zoom_download(url, title):
         if download_links:
             for link in download_links:
                 href = link.get('href')
-                if href and is_subtitle_file(href) and not is_video_file(href):
+                if isinstance(href, str) and is_subtitle_file(href) and not is_video_file(href):
                     file_ext = href.lower().split('.')[-1]
                     upload_file_to_telegram(href, "zoom.lk", title, file_ext)
                     return
@@ -191,7 +194,7 @@ def process_zoom_download(url, title):
         # Fallback: look for direct subtitle file links only
         for link in soup.find_all('a', href=True):
             href = link.get('href')
-            if is_subtitle_file(href) and not is_video_file(href):
+            if isinstance(href, str) and is_subtitle_file(href) and not is_video_file(href):
                 file_ext = href.lower().split('.')[-1]
                 upload_file_to_telegram(href, "zoom.lk", title, file_ext)
                 return
@@ -204,8 +207,13 @@ def process_zoom_download(url, title):
 def upload_file_to_telegram(file_url, source, title, file_type):
     """Download and upload file to Telegram"""
     try:
+        if is_already_processed(file_url):
+            logger.info(f"Skipping already processed: {title}")
+            return
+        
         if not bot or not TELEGRAM_CHAT_ID:
             logger.warning(f"Telegram not configured, saving {file_url} locally")
+            add_processed_subtitle(file_url, title, source, file_type)
             return
             
         logger.info(f"Downloading {file_type} file: {file_url}")
@@ -231,6 +239,7 @@ def upload_file_to_telegram(file_url, source, title, file_type):
                 bot.send_document(int(TELEGRAM_CHAT_ID), f, caption=caption)
             
             logger.info(f"Uploaded {filename} to Telegram")
+            add_processed_subtitle(file_url, title, source, file_type)
             filepath.unlink()
         else:
             logger.error(f"Downloaded file is empty: {filename}")
@@ -242,6 +251,7 @@ def upload_file_to_telegram(file_url, source, title, file_type):
 def main():
     """Run all scrapers"""
     logger.info("Starting subtitle scraper...")
+    logger.info(f"Total processed so far: {get_processed_count()}")
     
     try:
         scrape_biscope()
@@ -252,7 +262,7 @@ def main():
         
         scrape_zoom()
         
-        logger.info("Scraping completed successfully")
+        logger.info(f"Scraping completed successfully. Total processed: {get_processed_count()}")
         
     except Exception as e:
         logger.error(f"Main error: {e}")
