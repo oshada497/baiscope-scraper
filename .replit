@@ -29,8 +29,23 @@ author = "agent"
 task = "workflow.run"
 args = "Subtitle Scraper"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Subtitle Scraper Bot"
+
 [[workflows.workflow]]
 name = "Subtitle Scraper"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python main.py"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "Subtitle Scraper Bot"
 author = "agent"
 
 [[workflows.workflow.tasks]]
