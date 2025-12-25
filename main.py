@@ -11,9 +11,12 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-bot = TeleBot(TELEGRAM_TOKEN)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+bot = None
+if TELEGRAM_TOKEN:
+    bot = TeleBot(TELEGRAM_TOKEN)
 
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(exist_ok=True)
@@ -101,7 +104,7 @@ def process_download(url, source, title):
         
         for link in soup.find_all('a', href=True):
             href = link.get('href')
-            if href:
+            if isinstance(href, str):
                 if href.endswith('.zip'):
                     zip_file = href
                 elif href.endswith('.srt'):
@@ -120,6 +123,10 @@ def process_download(url, source, title):
 def upload_file_to_telegram(file_url, source, title, file_type):
     """Download and upload file to Telegram"""
     try:
+        if not bot or not TELEGRAM_CHAT_ID:
+            logger.warning(f"Telegram not configured, saving {file_url} locally")
+            return
+            
         logger.info(f"Downloading {file_type} file: {file_url}")
         
         file_response = requests.get(file_url, timeout=30, stream=True)
@@ -140,7 +147,7 @@ def upload_file_to_telegram(file_url, source, title, file_type):
             caption = f"📺 {title}\n🔗 Source: {source}\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             
             with open(filepath, 'rb') as f:
-                bot.send_document(TELEGRAM_CHAT_ID, f, caption=caption)
+                bot.send_document(int(TELEGRAM_CHAT_ID), f, caption=caption)
             
             logger.info(f"Uploaded {filename} to Telegram")
             filepath.unlink()
