@@ -156,10 +156,18 @@ class CloudflareD1:
                 )
             """)
             
-            self.execute("ALTER TABLE telegram_files ADD COLUMN normalized_filename TEXT")
+            # Try to add columns if they don't exist (migrations)
+            try:
+                # Check if column exists first or just catch the error
+                self.execute("ALTER TABLE telegram_files ADD COLUMN normalized_filename TEXT")
+            except Exception:
+                pass # Column likely exists
             
-            self.execute("CREATE INDEX IF NOT EXISTS idx_normalized_filename ON telegram_files(normalized_filename)")
-            
+            try:
+                self.execute("CREATE INDEX IF NOT EXISTS idx_normalized_filename ON telegram_files(normalized_filename)")
+            except Exception:
+                pass
+
             logger.info("D1 database tables initialized")
         except Exception as e:
             logger.error(f"Failed to initialize D1 tables: {e}")
@@ -600,26 +608,28 @@ class BaiscopeScraperTelegram:
                 logger.info(f"Fetching {url} (attempt {attempt + 1}, browser: {browser})")
                 
                 headers = {
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
                     'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'DNT': '1',
+                    'Cache-Control': 'max-age=0',
                     'Connection': 'keep-alive',
                     'Upgrade-Insecure-Requests': '1',
-                    'Cache-Control': 'max-age=0',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Sec-Fetch-Dest': 'document',
                     'Sec-Fetch-Mode': 'navigate',
                     'Sec-Fetch-Site': 'none',
                     'Sec-Fetch-User': '?1',
-                    'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124"',
+                    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
                     'sec-ch-ua-mobile': '?0',
                     'sec-ch-ua-platform': '"Windows"'
                 }
                 
+                # Randomized minor delay
+                time.sleep(random.uniform(2, 5))
+                
                 response = curl_requests.get(
                     url,
                     impersonate=browser,
-                    timeout=45,
+                    timeout=60,
                     headers=headers
                 )
                 response.raise_for_status()
