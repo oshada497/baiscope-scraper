@@ -34,7 +34,19 @@ class SubzLkScraper:
         self.batch_size = batch_size
         self.source = "subz"
         
-        self.d1 = CloudflareD1(cf_account_id, cf_api_token, d1_database_id)
+        self.source = "subz"
+        
+        # Robust credential loading (fallback to env vars if not passed)
+        self.cf_account_id = cf_account_id or os.environ.get('CF_ACCOUNT_ID') or os.environ.get('CLOUDFLARE_ACCOUNT_ID')
+        self.cf_api_token = cf_api_token or os.environ.get('CF_API_TOKEN') or os.environ.get('CLOUDFLARE_API_TOKEN')
+        self.d1_database_id = d1_database_id or os.environ.get('D1_DATABASE_ID')
+        
+        self.d1 = CloudflareD1(self.cf_account_id, self.cf_api_token, self.d1_database_id)
+        
+        if self.d1.enabled:
+            logger.info(f"SubzScraper D1 Connected: {self.d1_database_id}")
+        else:
+            logger.warning("SubzScraper D1 DISABLED (Missing credentials)")
         self.telegram = TelegramUploader(telegram_token, telegram_chat_id)
         self.tracker = ProgressTracker(self.telegram, interval=120)
         
