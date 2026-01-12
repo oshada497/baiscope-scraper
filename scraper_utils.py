@@ -103,9 +103,6 @@ class CloudflareD1:
         
         self.enabled = bool(account_id and api_token and database_id)
         logger.info(f"D1 initialized. Enabled: {self.enabled} (Acc: {bool(account_id)}, Token: {bool(api_token)}, DB: {bool(database_id)})")
-        
-        if self.enabled:
-            self._init_tables()
     
     def _init_tables(self):
         try:
