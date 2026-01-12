@@ -28,29 +28,14 @@ app = Flask(__name__)
 
 # Global status tracking
 scraper_status = {
-    'baiscope': {
-        'status': 'idle',
-        'last_run': None,
-        'processed': 0,
-        'success': 0
-    },
-    'subz': {
-        'status': 'idle',
-        'last_run': None,
-        'processed': 0,
-        'success': 0
-    }
+    'status': 'idle',
+    'last_run': None,
+    'processed': 0,
+    'success': 0
 }
 
-current_scrapers = {
-    'baiscope': None,
-    'subz': None
-}
-
-scraper_threads = {
-    'baiscope': None,
-    'subz': None
-}
+current_scraper = None
+scraper_thread = None
 
 
 def get_credentials():
@@ -74,8 +59,8 @@ def get_credentials():
 
 
 def run_monitoring_job():
-    """Run monitoring for both sites (called periodically)"""
-    global current_scrapers, scraper_status
+    """Run monitoring for Subz.lk (called periodically)"""
+    global current_scraper, scraper_status
     
     creds = get_credentials()
     
@@ -84,15 +69,14 @@ def run_monitoring_job():
         return
     
     logger.info("="*60)
-    logger.info("STARTING PERIODIC MONITORING")
+    logger.info("STARTING SUBZ.LK MONITORING")
     logger.info("="*60)
     
-    # Monitor Subz.lk
     try:
-        scraper_status['subz']['status'] = 'running'
-        scraper_status['subz']['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
+        scraper_status['status'] = 'running'
+        scraper_status['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
         
-        subz_scraper = SubzLkScraper(
+        scraper = SubzLkScraper(
             telegram_token=creds['telegram_token'],
             telegram_chat_id=creds['telegram_chat_id'],
             cf_account_id=creds['cf_account_id'],
@@ -100,58 +84,20 @@ def run_monitoring_job():
             d1_database_id=creds['d1_database_id']
         )
         
-        current_scrapers['subz'] = subz_scraper
-        result = subz_scraper.monitor_new_subtitles()
+        current_scraper = scraper
+        scraper.initialize()
         
-        scraper_status['subz']['status'] = 'idle'
-        scraper_status['subz']['success'] = result
-        scraper_status['subz']['processed'] = len(subz_scraper.processed_urls)
+        result = scraper.monitor_new_subtitles()
+        
+        scraper_status['status'] = 'idle'
+        scraper_status['success'] = result
+        scraper_status['processed'] = len(scraper.processed_urls)
         
         logger.info(f"Subz.lk monitoring complete: {result} new subtitles")
         
     except Exception as e:
         logger.error(f"Error monitoring subz.lk: {e}", exc_info=True)
-        scraper_status['subz']['status'] = f'error: {str(e)[:100]}'
-    
-    # Monitor Baiscope.lk (check recent pages only)
-    try:
-        from main import BaiscopeScraperTelegram
-        
-        scraper_status['baiscope']['status'] = 'running'
-        scraper_status['baiscope']['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
-        
-        baiscope_scraper = BaiscopeScraperTelegram(
-            telegram_token=creds['telegram_token'],
-            telegram_chat_id=creds['telegram_chat_id'],
-            cf_account_id=creds['cf_account_id'],
-            cf_api_token=creds['cf_api_token'],
-            d1_database_id=creds['d1_database_id']
-        )
-        
-        current_scrapers['baiscope'] = baiscope_scraper
-        
-        # Check first 3 pages of main category for new content
-        category = "/category/sinhala-subtitles/"
-        new_count = 0
-        
-        for page in range(1, 4):
-            subtitle_urls = baiscope_scraper.get_subtitle_urls_from_page(category, page)
-            if subtitle_urls:
-                new_urls = [url for url in subtitle_urls if url not in baiscope_scraper.processed_urls]
-                if new_urls:
-                    logger.info(f"Baiscope page {page}: {len(new_urls)} new URLs")
-                    success = baiscope_scraper.process_page_subtitles(new_urls)
-                    new_count += success
-        
-        scraper_status['baiscope']['status'] = 'idle'
-        scraper_status['baiscope']['success'] = new_count
-        scraper_status['baiscope']['processed'] = len(baiscope_scraper.processed_urls)
-        
-        logger.info(f"Baiscope.lk monitoring complete: {new_count} new subtitles")
-        
-    except Exception as e:
-        logger.error(f"Error monitoring baiscope.lk: {e}", exc_info=True)
-        scraper_status['baiscope']['status'] = f'error: {str(e)[:100]}'
+        scraper_status['status'] = f'error: {str(e)[:100]}'
     
     logger.info("="*60)
     logger.info("MONITORING CYCLE COMPLETE")
@@ -182,40 +128,31 @@ monitoring_thread.start()
 def health():
     """Health check endpoint"""
     return jsonify({
-        'service': 'BiScope & Subz.lk Subtitle Scraper',
+        'service': 'Subz.lk Dedicated Scraper',
         'mode': 'Monitoring (15 min intervals)',
         'status': 'running',
         'endpoints': [
             '/status - View scraper status',
             '/trigger - Manually trigger monitoring',
-            '/scrape/subz - Full scrape of subz.lk',
+            '/scrape/subz - Full history scrape',
+            '/debug - Internal diagnostics'
         ]
     }), 200
 
 
 @app.route('/status')
 def status():
-    """Get current status of both scrapers"""
+    """Get current status of Subz.lk scraper"""
     response = {
         'monitoring_interval': '15 minutes',
-        'scrapers': scraper_status
+        'subz': scraper_status
     }
     
-    # Add D1 stats if available
-    # Add D1 stats if available (use cached stats to avoid timeout)
-    for site, scraper in current_scrapers.items():
-        if scraper and hasattr(scraper, 'stats'):
-             response['scrapers'][site]['d1_stats'] = scraper.stats
-        elif scraper and hasattr(scraper, 'd1') and scraper.d1.enabled:
-             # Fallback (careful with timeouts)
-             try:
-                response['scrapers'][site]['d1_stats'] = {
-                    'discovered': scraper.d1.get_discovered_urls_count(source=scraper.source if hasattr(scraper, 'source') else site),
-                    'processed': scraper.d1.get_processed_urls_count(source=scraper.source if hasattr(scraper, 'source') else site)
-                }
-             except Exception:
-                response['scrapers'][site]['d1_stats'] = {'error': 'timeout'}
-    
+    if current_scraper:
+        response['subz']['d1_stats'] = current_scraper.stats
+        if hasattr(current_scraper, 'initialization_status'):
+            response['subz']['init_status'] = current_scraper.initialization_status
+            
     return jsonify(response)
 
 
@@ -234,19 +171,19 @@ def trigger_monitoring():
 @app.route('/scrape/subz')
 def scrape_subz_full():
     """Trigger full scrape of subz.lk (run once for initial setup)"""
-    global scraper_threads
+    global scraper_thread
     
-    if scraper_threads['subz'] and scraper_threads['subz'].is_alive():
+    if scraper_thread and scraper_thread.is_alive():
         return jsonify({'error': 'Subz scraper is already running'}), 400
     
     def run_full_scrape():
-        global current_scrapers, scraper_status
+        global current_scraper, scraper_status
         
         creds = get_credentials()
         
         try:
-            scraper_status['subz']['status'] = 'full_scrape_running'
-            scraper_status['subz']['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
+            scraper_status['status'] = 'initializing'
+            scraper_status['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
             
             scraper = SubzLkScraper(
                 telegram_token=creds['telegram_token'],
@@ -257,26 +194,26 @@ def scrape_subz_full():
             )
             
             # Expose scraper immediately so /status sees it
-            current_scrapers['subz'] = scraper
-            scraper_status['subz']['status'] = 'initializing_db'
+            current_scraper = scraper
+            scraper_status['status'] = 'initializing_db'
             
             # Load data (this takes time)
             scraper.initialize()
             
-            scraper_status['subz']['status'] = 'full_scrape_running'
+            scraper_status['status'] = 'full_scrape_running'
             
             result = scraper.scrape_all_categories()
             
-            scraper_status['subz']['status'] = 'idle'
-            scraper_status['subz']['success'] = result
-            scraper_status['subz']['processed'] = len(scraper.processed_urls)
+            scraper_status['status'] = 'idle'
+            scraper_status['success'] = result
+            scraper_status['processed'] = len(scraper.processed_urls)
             
         except Exception as e:
             logger.error(f"Error in full scrape: {e}", exc_info=True)
-            scraper_status['subz']['status'] = f'error: {str(e)[:100]}'
+            scraper_status['status'] = f'error: {str(e)[:100]}'
     
-    scraper_threads['subz'] = threading.Thread(target=run_full_scrape, daemon=True)
-    scraper_threads['subz'].start()
+    scraper_thread = threading.Thread(target=run_full_scrape, daemon=True)
+    scraper_thread.start()
     
     return jsonify({
         'message': 'Full scrape of subz.lk started',
@@ -290,19 +227,18 @@ def debug_state():
     response = {
         'pid': os.getpid(),
         'scraper_status': scraper_status,
-        'current_scrapers_keys': list(current_scrapers.keys()),
-        'subz_is_none': current_scrapers['subz'] is None,
-        'baiscope_is_none': current_scrapers['baiscope'] is None,
-        'thread_active': scraper_threads['subz'].is_alive() if scraper_threads['subz'] else False
+        'scraper_is_none': current_scraper is None,
+        'thread_active': scraper_thread.is_alive() if scraper_thread else False
     }
     
-    if current_scrapers['subz']:
-        s = current_scrapers['subz']
-        response['subz_details'] = {
+    if current_scraper:
+        s = current_scraper
+        response['details'] = {
             'type': str(type(s)),
             'has_stats': hasattr(s, 'stats'),
             'd1_enabled': s.d1.enabled if hasattr(s, 'd1') else 'no_d1',
-            'stats': s.stats if hasattr(s, 'stats') else 'missing'
+            'stats': s.stats if hasattr(s, 'stats') else 'missing',
+            'init_status': s.initialization_status if hasattr(s, 'initialization_status') else 'unknown'
         }
         
     return jsonify(response)
