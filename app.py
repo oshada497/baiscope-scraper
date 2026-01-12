@@ -276,6 +276,30 @@ def scrape_subz_full():
     })
 
 
+@app.route('/debug')
+def debug_state():
+    """Dump internal state for debugging"""
+    response = {
+        'pid': os.getpid(),
+        'scraper_status': scraper_status,
+        'current_scrapers_keys': list(current_scrapers.keys()),
+        'subz_is_none': current_scrapers['subz'] is None,
+        'baiscope_is_none': current_scrapers['baiscope'] is None,
+        'thread_active': scraper_threads['subz'].is_alive() if scraper_threads['subz'] else False
+    }
+    
+    if current_scrapers['subz']:
+        s = current_scrapers['subz']
+        response['subz_details'] = {
+            'type': str(type(s)),
+            'has_stats': hasattr(s, 'stats'),
+            'd1_enabled': s.d1.enabled if hasattr(s, 'd1') else 'no_d1',
+            'stats': s.stats if hasattr(s, 'stats') else 'missing'
+        }
+        
+    return jsonify(response)
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     logger.info(f"Starting Flask app on port {port}")
