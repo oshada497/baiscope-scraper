@@ -48,6 +48,7 @@ class SubzLkScraper:
     
     def _load_existing_filenames(self):
         if self.d1.enabled:
+            # Check only THIS source (subz) for duplicates
             filenames = self.d1.get_all_normalized_filenames(source=self.source)
             if filenames:
                 logger.info(f"Loaded {len(filenames)} existing filenames from D1 for subz.lk")
@@ -536,9 +537,15 @@ class SubzLkScraper:
         return total_discovered
 
     def scrape_all_categories(self, limit=None):
-        """Legacy method - runs crawl then process"""
-        logger.info("Running legacy scrape_all_categories (Crawl + Process)")
-        self.crawl_only(limit_pages=10) # Limit pages to avoid infinite loops in legacy mode
+        """Unified method - runs full crawl (Discovery) then process (Queue Worker)"""
+        logger.info("Running Unified Scraper: Crawl + Process")
+        
+        # Step 1: Crawl
+        logger.info(">>> STEP 1: CRAWLING <<<")
+        self.crawl_only() # No limit argument means full crawl
+        
+        # Step 2: Process
+        logger.info(">>> STEP 2: PROCESSING QUEUE <<<")
         return self.process_queue_mode(limit=limit)
 
 
@@ -570,5 +577,5 @@ if __name__ == '__main__':
     elif len(sys.argv) > 1 and sys.argv[1] == 'process':
         scraper.process_queue_mode()
     else:
-        # Default behavior
-        scraper.monitor_new_subtitles(limit=5)
+        # Default behavior: Unified run
+        scraper.scrape_all_categories()
