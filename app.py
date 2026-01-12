@@ -55,13 +55,22 @@ scraper_threads = {
 
 def get_credentials():
     """Get credentials from environment variables"""
-    return {
+    creds = {
         'telegram_token': os.environ.get('TELEGRAM_BOT_TOKEN'),
         'telegram_chat_id': os.environ.get('TELEGRAM_CHAT_ID', '-1003442794989'),
         'cf_account_id': os.environ.get('CF_ACCOUNT_ID') or os.environ.get('CLOUDFLARE_ACCOUNT_ID'),
         'cf_api_token': os.environ.get('CF_API_TOKEN') or os.environ.get('CLOUDFLARE_API_TOKEN'),
         'd1_database_id': os.environ.get('D1_DATABASE_ID')
     }
+    
+    # Debug logging to find missing creds
+    missing = [k for k, v in creds.items() if not v]
+    if missing:
+        logger.error(f"Missing credentials: {', '.join(missing)}")
+    else:
+        logger.info(f"Credentials loaded: Account={creds['cf_account_id'][:4]}..., DB={creds['d1_database_id']}")
+        
+    return creds
 
 
 def run_monitoring_job():

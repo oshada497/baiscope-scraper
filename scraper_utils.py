@@ -101,6 +101,9 @@ class CloudflareD1:
         }
         self.enabled = bool(account_id and api_token and database_id)
         
+        self.enabled = bool(account_id and api_token and database_id)
+        logger.info(f"D1 initialized. Enabled: {self.enabled} (Acc: {bool(account_id)}, Token: {bool(api_token)}, DB: {bool(database_id)})")
+        
         if self.enabled:
             self._init_tables()
     
@@ -165,10 +168,12 @@ class CloudflareD1:
                 "ALTER TABLE scraper_state ADD COLUMN source TEXT DEFAULT 'baiscope'"
             ]
             
+            # Try to add columns if they don't exist (migrations)
             for sql in schema_updates:
                 try:
-                    self.execute(sql)
-                except:
+                    self.execute(sql, log_error=False)
+                except Exception:
+                    # Column likely exists, ignore error to keep logs clean
                     pass
             
             # Create indexes
@@ -180,13 +185,13 @@ class CloudflareD1:
             ]
             
             for sql in indexes:
-                self.execute(sql)
+                self.execute(sql, log_error=False)
             
             logger.info("D1 database tables initialized with source tracking and queue status")
         except Exception as e:
             logger.error(f"Failed to initialize D1 tables: {e}")
     
-    def execute(self, sql, params=None):
+    def execute(self, sql, params=None, log_error=True):
         if not self.enabled:
             return None
             
@@ -201,10 +206,12 @@ class CloudflareD1:
             if data.get("success"):
                 return data.get("result", [])
             else:
-                logger.error(f"D1 query error: {data.get('errors')}")
+                if log_error:
+                    logger.error(f"D1 query error: {data.get('errors')}")
                 return None
         except Exception as e:
-            logger.error(f"D1 execute error: {e}")
+            if log_error:
+                logger.error(f"D1 execute error: {e}")
             return None
     
     def add_discovered_url(self, url, category="", page=0, source="baiscope"):
