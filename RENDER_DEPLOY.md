@@ -39,23 +39,32 @@ Click **Create Web Service**. Render will start the build.
 ---
 
 ## ⚡ How to Run the Initial Full Scrape
-The web service is great for *monitoring new files*, but for the **first run** to scrape thousands of existing movies, you should run the dedicated script.
+Since you are using the **Render Free Tier**, you do not have Shell access. 
+However, I have built a special "Trigger URL" so you can start the full scrape directly from your browser.
 
-### Method A: Using Render Shell (Easiest)
-1.  Wait for the Web Service to be "Live".
-2.  Go to the **Shell** tab in your Render service dashboard.
-3.  Run this command:
-    ```bash
-    python scrape_subz_full.py
+### Step-by-Step Instructions
+1.  Deploy the Web Service as described above.
+2.  Wait for the service to be **Live**.
+3.  Open your browser and visit this URL (replace with your actual Render URL):
     ```
-4.  You will see the logs immediately in the terminal. It will crawl all categories and then process them. This is the **fastest** way.
+    https://subz-scraper-bot.onrender.com/scrape/subz
+    ```
+4.  You will see a JSON response saying:
+    ```json
+    {
+      "message": "Full scrape of subz.lk started",
+      "note": "This will take several hours. Check /status for progress"
+    }
+    ```
+5.  **That's it!** The scraper is now running in the background. 
+    *   It will crawl all pages.
+    *   It will save all new links to the database.
+    *   It will start processing them.
 
-### Method B: Using Cron Job (Alternative)
-If you don't want a web server and just want the script to run repeatedly (e.g. every hour):
-1.  Create a **Cron Job** instead of a Web Service.
-2.  **Schedule**: `0 * * * *` (Runs every hour)
-3.  **Command**: `python scrape_subz_full.py`
-4.  This will run the full check every hour and exit when done.
+### Important Note for Free Tier
+On the Free Tier, Render might spin down your service if it's "inactive" for 15 minutes. 
+*   **The Problem**: If the service sleeps, the background scrape might pause.
+*   **The Fix**: Use a free uptime monitor (like UptimeRobot) to ping your main URL (`https://...onrender.com/`) every 10 minutes. This keeps it awake so the scraper can finish its job.
 
 ---
 
