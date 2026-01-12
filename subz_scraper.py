@@ -52,13 +52,38 @@ class SubzLkScraper:
         
         self.browser_versions = ["chrome110", "chrome116", "chrome120", "chrome124"]
         
+        self.stats = {'discovered': 0, 'processed': 0} # Init empty
+        self.initialization_status = "pending"
+        
+        # Data containers - loaded in initialize()
+        self.processed_urls = set()
+        self.existing_filenames = set()
+        
+    def initialize(self):
+        """Load data from D1 (can take time)"""
+        self.initialization_status = "loading_stats"
+        self.stats = self._init_stats()
+        
+        self.initialization_status = "loading_processed_urls"
         self.processed_urls = self._load_processed_urls()
+        
+        self.initialization_status = "loading_filenames"
         self.existing_filenames = self._load_existing_filenames()
         
-        self.lock = threading.Lock()
-        self.num_workers = 3
+        self.initialization_status = "ready"
         
+    def initialize(self):
+        """Load data from D1 (can take time)"""
+        self.initialization_status = "loading_stats"
         self.stats = self._init_stats()
+        
+        self.initialization_status = "loading_processed_urls"
+        self.processed_urls = self._load_processed_urls()
+        
+        self.initialization_status = "loading_filenames"
+        self.existing_filenames = self._load_existing_filenames()
+        
+        self.initialization_status = "ready"
         
     def _load_processed_urls(self):
         if self.d1.enabled:

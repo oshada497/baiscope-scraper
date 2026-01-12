@@ -256,7 +256,15 @@ def scrape_subz_full():
                 d1_database_id=creds['d1_database_id']
             )
             
+            # Expose scraper immediately so /status sees it
             current_scrapers['subz'] = scraper
+            scraper_status['subz']['status'] = 'initializing_db'
+            
+            # Load data (this takes time)
+            scraper.initialize()
+            
+            scraper_status['subz']['status'] = 'full_scrape_running'
+            
             result = scraper.scrape_all_categories()
             
             scraper_status['subz']['status'] = 'idle'
