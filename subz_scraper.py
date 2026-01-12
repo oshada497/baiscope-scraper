@@ -97,6 +97,9 @@ class SubzLkScraper:
         logger.info(">>> STARTING DISCOVERY PHASE (Crawl Only) <<<")
         categories = ["/category/movies/", "/category/tv-shows/"]
         
+        # Start tracker in "Discovery" mode
+        self.tracker.start(0) 
+        
         # Load resume state
         resume_cat, resume_page = self.d1.get_state(source=self.source) if self.d1.enabled else (None, None)
         start_tracking = False if resume_cat else True
@@ -114,6 +117,7 @@ class SubzLkScraper:
             while True:
                 if limit_pages and page > limit_pages: break
                 
+                self.tracker.update_page(category, page)
                 cat_url = f"{self.base_url}{category}"
                 fetch_url = cat_url if page == 1 else f"{cat_url.rstrip('/')}/page/{page}/"
                 
@@ -134,6 +138,9 @@ class SubzLkScraper:
                 
                 logger.info(f"Category {category} Page {page}: Found {len(links)} links ({new_on_page} NEW)")
                 
+                # Update tracker with newly discovered count
+                self.tracker.total_found = self.d1.get_pending_count(source=self.source)
+                
                 # Persistence: Save state every page
                 if self.d1.enabled:
                     self.d1.save_state(category, page, source=self.source)
@@ -147,10 +154,12 @@ class SubzLkScraper:
                     break
                     
                 page += 1
-                time.sleep(random.uniform(1.0, 2.0)) # Politeness
+                time.sleep(random.uniform(0.5, 1.0)) # Faster discovery
 
         logger.info(f"Discovery complete. Total new URLs found: {total_new}")
+        self.tracker.stop()
         return total_new
+
 
     def _process_one(self, url):
         """Download and upload a single subtitle"""
@@ -255,25 +264,32 @@ class SubzLkScraper:
             urls = [r['url'] for r in batch if r.get('url')]
             logger.info(f"Processing Batch: {len(urls)} items with {self.num_workers} workers")
             
-            self.tracker.start(len(urls))
+            # Start tracker if not already running (e.g. if we jumped straight to processing)
+            if not self.tracker.thread or not self.tracker.thread.is_alive():
+                self.tracker.start(self.d1.get_pending_count(source=self.source))
+                
             with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
                 futures = {executor.submit(self._process_one, u): u for u in urls}
                 for future in as_completed(futures):
                     res = future.result()
                     self.tracker.update(success=res)
                     processed_count += 1
-            self.tracker.stop()
             
+            # Force log flush for Render
+            sys.stdout.flush()
             time.sleep(random.uniform(2, 5)) # Batch cooldown
             
+        self.tracker.stop()
         return processed_count
 
     def scrape_all_categories(self, limit=None):
         """Unified Master Method"""
         # 1. Discover everything first
         self.crawl_only()
-        # 2. Process what was discovered
+        # 2. Update stats and process
+        self.stats['discovered'] = self.d1.get_discovered_urls_count(source=self.source)
         return self.process_queue_mode(limit=limit)
+
 
     def monitor_new_subtitles(self):
         """Quick check of homepage for immediate updates"""
