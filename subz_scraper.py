@@ -52,6 +52,9 @@ class SubzLkScraper:
         
         self.browser_versions = ["chrome110", "chrome116", "chrome120", "chrome124"]
         
+        self.lock = threading.Lock()
+        self.num_workers = 3
+        
         self.stats = {'discovered': 0, 'processed': 0} # Init empty
         self.initialization_status = "pending"
         

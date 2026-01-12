@@ -183,7 +183,7 @@ class CloudflareD1:
             for sql in indexes:
                 self.execute(sql, log_error=False)
             
-            logger.info("D1 database tables initialized with source tracking and queue status")
+            logger.info("D1 database tables initialized and migrated to dedicated 'subz' source")
         except Exception as e:
             logger.error(f"Failed to initialize D1 tables: {e}")
     
