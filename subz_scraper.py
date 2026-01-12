@@ -141,9 +141,26 @@ class SubzLkScraper:
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Extract title
-        title_elem = soup.find('h1', class_='entry-title') or soup.find('h1')
-        title_text = title_elem.get_text(strip=True) if title_elem else 'Unknown'
+        # Extract title - FIXED: Use h2.subz_title which contains the actual title
+        title_elem = soup.find('h2', class_='subz_title')
+        if not title_elem:
+            # Fallback to meta tag or h1
+            title_elem = soup.find('h1') or soup.find('meta', property='og:title')
+            if title_elem and title_elem.name == 'meta':
+                title_text = title_elem.get('content', 'Unknown')
+                # Remove site suffix if present
+                title_text = title_text.replace(' - Subz LK | සිංහල උපසිරැසි', '').strip()
+            elif title_elem:
+                title_text = title_elem.get_text(strip=True)
+            else:
+                title_text = 'Unknown'
+        else:
+            title_text = title_elem.get_text(strip=True)
+        
+        # Remove "Sinhala Subtitle" suffix if present
+        title_text = title_text.replace(' Sinhala Subtitle', '').strip()
+        
+        logger.info(f"Extracted title: {title_text}")
         
         # Extract download parameters
         sub_id, nonce = self._extract_download_params(response.text)
@@ -357,9 +374,89 @@ class SubzLkScraper:
         logger.info(f"Monitoring complete: {success}/{len(new_urls)} successful")
         return success
     
-    def scrape_all_categories(self, limit=None):
-        """Full scrape of all categories on subz.lk"""
-        logger.info("Starting full subz.lk scrape...")
+    
+    def process_queue_mode(self, limit=None):
+        """Process pending URLs from the database queue"""
+        logger.info("Starting queue processing mode...")
+        
+        # Get pending count
+        pending_count = self.d1.get_pending_count(source=self.source) if self.d1.enabled else 0
+        
+        self.telegram.send_message(
+            f"<b>Subz.lk Processor Starting</b>\n"
+            f"Mode: Process Queue\n"
+            f"Pending items: {pending_count}"
+        )
+        
+        processed_count = 0
+        success_count = 0
+        consecutive_errors = 0
+        
+        while True:
+            # Check limit
+            if limit and processed_count >= limit:
+                logger.info(f"Reached processing limit of {limit}")
+                break
+                
+            # Get next batch of pending URLs
+            pending_urls = self.d1.get_pending_urls(limit=self.batch_size, source=self.source)
+            
+            if not pending_urls:
+                logger.info("No more pending URLs in queue")
+                break
+                
+            logger.info(f"Fetched {len(pending_urls)} pending URLs from queue")
+            
+            # Process batch
+            for row in pending_urls:
+                url = row.get("url")
+                if not url:
+                    continue
+                    
+                if limit and processed_count >= limit:
+                    break
+                
+                # Update status to processing (optional, but good for visibility)
+                # self.d1.update_url_status(url, 'processing')
+                
+                try:
+                    logger.info(f"Processing queue item {processed_count+1}: {url}")
+                    result, title = self.download_and_process_subtitle(url)
+                    
+                    processed_count += 1
+                    if result:
+                        success_count += 1
+                        consecutive_errors = 0
+                    else:
+                        consecutive_errors += 1
+                        
+                    # Status update is handled inside download_and_process_subtitle -> _mark_url_processed -> d1.add_processed_url
+                    # add_processed_url calls update_url_status internally
+                    
+                    if consecutive_errors >= 10:
+                        logger.warning("Too many consecutive errors, cooling down...")
+                        time.sleep(30)
+                        consecutive_errors = 0
+                        
+                    time.sleep(random.uniform(2.0, 5.0))
+                    
+                except Exception as e:
+                    logger.error(f"Error processing {url}: {e}")
+                    self.d1.update_url_status(url, 'failed')
+                    consecutive_errors += 1
+        
+        self.telegram.send_message(
+            f"<b>Subz.lk Processing Complete!</b>\n"
+            f"Processed: {processed_count}\n"
+            f"Successfully uploaded: {success_count}\n"
+            f"Remaining in queue: {self.d1.get_pending_count(source=self.source)}"
+        )
+        
+        return success_count
+
+    def crawl_only(self, limit_pages=None):
+        """Crawl all categories and just discover URLs (no downloading)"""
+        logger.info("Starting crawler mode (discovery only)...")
         
         categories = [
             "/category/movies/",
@@ -367,24 +464,25 @@ class SubzLkScraper:
         ]
         
         self.telegram.send_message(
-            f"<b>Subz.lk Full Scraper Starting</b>\n"
-            f"Mode: Full scrape\n"
-            f"Categories: {len(categories)}\n"
-            f"Previously processed: {len(self.processed_urls)}"
+            f"<b>Subz.lk Crawler Starting</b>\n"
+            f"Mode: Discovery Only\n"
+            f"Categories: {len(categories)}"
         )
         
-        total_success = 0
-        total_processed = 0
+        total_discovered = 0
         
         for category in categories:
             page = 1
-            max_pages = 500
+            max_pages = limit_pages if limit_pages else 500
             consecutive_empty = 0
             
-            logger.info(f"\n=== Processing category: {category} ===")
+            logger.info(f"\n=== Crawling category: {category} ===")
             
             while page <= max_pages:
                 category_url = f"{self.base_url}{category}"
+                
+                # Check state to resume if needed (not fully implemented yet, just starting from 1)
+                
                 subtitle_urls = self.get_subtitle_urls_from_page(category_url, page)
                 
                 if subtitle_urls is None:
@@ -395,48 +493,53 @@ class SubzLkScraper:
                     page += 1
                     continue
                 
-                new_urls = [url for url in subtitle_urls if url not in self.processed_urls]
+                # Filter what's already discovered or processed
+                new_items = 0
+                for url in subtitle_urls:
+                    # Check if already processed
+                    if self.d1.is_url_processed(url):
+                        continue
+                        
+                    # Check if already in telegram files (by some other means)
+                    # For now just add to discovered, D1 will ignore duplicates
+                    
+                    # Add to discovered_urls with pending status
+                    self._save_discovered_url(url, category, page)
+                    new_items += 1
                 
-                if len(new_urls) == 0:
+                if new_items == 0:
                     consecutive_empty += 1
-                    if consecutive_empty >= 3:
-                        logger.info(f"No more new content in {category}")
+                    if consecutive_empty >= 5: # More leniency for crawler
+                        logger.info(f"No new items found for 5 pages, assuming category is up to date")
                         break
-                    page += 1
-                    continue
+                else:
+                    consecutive_empty = 0
+                    total_discovered += new_items
                 
-                consecutive_empty = 0
-                self.tracker.update_page(category, page)
+                logger.info(f"Page {page}: Found {len(subtitle_urls)} links, {new_items} new pending")
                 
-                logger.info(f"Processing {len(new_urls)} new subtitles from page {page}")
-                
-                success = self.process_page_subtitles(new_urls)
-                total_success += success
-                total_processed += len(new_urls)
-                
-                logger.info(f"Page {page} complete: {success}/{len(new_urls)} successful")
-                
-                if limit and total_processed >= limit:
-                    logger.info(f"Reached limit of {limit} subtitles")
-                    break
+                # Save state
+                if self.d1.enabled:
+                    self.d1.save_state(category, page, source=self.source)
                 
                 page += 1
-                time.sleep(random.uniform(2.0, 4.0))
+                time.sleep(random.uniform(1.0, 2.5)) # Faster than full processing
             
-            if limit and total_processed >= limit:
-                break
+            time.sleep(2)
             
-            time.sleep(random.uniform(3.0, 6.0))
-        
+        logger.info(f"Crawling complete! Discovered {total_discovered} new URLs")
         self.telegram.send_message(
-            f"<b>Subz.lk Scraping Complete!</b>\n"
-            f"Total processed: {total_processed}\n"
-            f"Successfully uploaded: {total_success}\n"
-            f"Total in database: {len(self.processed_urls)}"
+            f"<b>Subz.lk Crawl Complete</b>\n"
+            f"New URLs discovered: {total_discovered}\n"
+            f"Total pending: {self.d1.get_pending_count(source=self.source)}"
         )
-        
-        logger.info(f"Scraping complete! Processed {total_processed}, success: {total_success}")
-        return total_success
+        return total_discovered
+
+    def scrape_all_categories(self, limit=None):
+        """Legacy method - runs crawl then process"""
+        logger.info("Running legacy scrape_all_categories (Crawl + Process)")
+        self.crawl_only(limit_pages=10) # Limit pages to avoid infinite loops in legacy mode
+        return self.process_queue_mode(limit=limit)
 
 
 if __name__ == '__main__':
@@ -460,5 +563,12 @@ if __name__ == '__main__':
         d1_database_id=D1_DATABASE_ID
     )
     
-    # Run monitoring mode by default
-    scraper.monitor_new_subtitles(limit=5)
+    # Check args
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == 'crawl':
+        scraper.crawl_only()
+    elif len(sys.argv) > 1 and sys.argv[1] == 'process':
+        scraper.process_queue_mode()
+    else:
+        # Default behavior
+        scraper.monitor_new_subtitles(limit=5)

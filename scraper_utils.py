@@ -113,6 +113,7 @@ class CloudflareD1:
                     category TEXT,
                     page INTEGER,
                     source TEXT DEFAULT 'baiscope',
+                    status TEXT DEFAULT 'pending',
                     discovered_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -155,33 +156,33 @@ class CloudflareD1:
                 )
             """)
             
-            # Try to add source columns if they don't exist (migration)
-            try:
-                self.execute("ALTER TABLE telegram_files ADD COLUMN source TEXT DEFAULT 'baiscope'")
-            except:
-                pass  # Column might already exist
+            # Try to add columns if they don't exist (migrations)
+            schema_updates = [
+                "ALTER TABLE telegram_files ADD COLUMN source TEXT DEFAULT 'baiscope'",
+                "ALTER TABLE discovered_urls ADD COLUMN source TEXT DEFAULT 'baiscope'",
+                "ALTER TABLE discovered_urls ADD COLUMN status TEXT DEFAULT 'pending'",
+                "ALTER TABLE processed_urls ADD COLUMN source TEXT DEFAULT 'baiscope'",
+                "ALTER TABLE scraper_state ADD COLUMN source TEXT DEFAULT 'baiscope'"
+            ]
             
-            try:
-                self.execute("ALTER TABLE discovered_urls ADD COLUMN source TEXT DEFAULT 'baiscope'")
-            except:
-                pass
-            
-            try:
-                self.execute("ALTER TABLE processed_urls ADD COLUMN source TEXT DEFAULT 'baiscope'")
-            except:
-                pass
-            
-            try:
-                self.execute("ALTER TABLE scraper_state ADD COLUMN source TEXT DEFAULT 'baiscope'")
-            except:
-                pass
+            for sql in schema_updates:
+                try:
+                    self.execute(sql)
+                except:
+                    pass
             
             # Create indexes
-            self.execute("CREATE INDEX IF NOT EXISTS idx_normalized_filename ON telegram_files(normalized_filename)")
-            self.execute("CREATE INDEX IF NOT EXISTS idx_source ON telegram_files(source)")
-            self.execute("CREATE INDEX IF NOT EXISTS idx_source_urls ON processed_urls(source)")
+            indexes = [
+                "CREATE INDEX IF NOT EXISTS idx_normalized_filename ON telegram_files(normalized_filename)",
+                "CREATE INDEX IF NOT EXISTS idx_source ON telegram_files(source)",
+                "CREATE INDEX IF NOT EXISTS idx_source_urls ON processed_urls(source)",
+                "CREATE INDEX IF NOT EXISTS idx_pending_urls ON discovered_urls(status, source)"
+            ]
             
-            logger.info("D1 database tables initialized with source tracking")
+            for sql in indexes:
+                self.execute(sql)
+            
+            logger.info("D1 database tables initialized with source tracking and queue status")
         except Exception as e:
             logger.error(f"Failed to initialize D1 tables: {e}")
     
@@ -208,11 +209,31 @@ class CloudflareD1:
     
     def add_discovered_url(self, url, category="", page=0, source="baiscope"):
         return self.execute(
-            "INSERT OR IGNORE INTO discovered_urls (url, category, page, source) VALUES (?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO discovered_urls (url, category, page, source, status) VALUES (?, ?, ?, ?, 'pending')",
             [url, category, page, source]
         )
     
+    def get_pending_urls(self, limit=10, source="baiscope"):
+        """Get a list of pending URLs to process"""
+        result = self.execute(
+            "SELECT url, category FROM discovered_urls WHERE status = 'pending' AND source = ? LIMIT ?", 
+            [source, limit]
+        )
+        if result and len(result) > 0:
+            return [row for row in result[0].get("results", [])]
+        return []
+        
+    def update_url_status(self, url, status):
+        """Update status of a discovered URL (pending, processing, completed, failed)"""
+        return self.execute(
+            "UPDATE discovered_urls SET status = ? WHERE url = ?",
+            [status, url]
+        )
+
     def add_processed_url(self, url, success=False, title="", source="baiscope"):
+        # Update both tables - mark as completed in discovered, add to processed
+        self.update_url_status(url, 'completed' if success else 'failed')
+        
         return self.execute(
             "INSERT OR REPLACE INTO processed_urls (url, success, title, source, processed_at) VALUES (?, ?, ?, ?, datetime('now'))",
             [url, 1 if success else 0, title[:200] if title else "", source]
@@ -245,6 +266,17 @@ class CloudflareD1:
                 return results[0].get("count", 0)
         return 0
     
+    def get_pending_count(self, source=None):
+        if source:
+            result = self.execute("SELECT COUNT(*) as count FROM discovered_urls WHERE status = 'pending' AND source = ?", [source])
+        else:
+            result = self.execute("SELECT COUNT(*) as count FROM discovered_urls WHERE status = 'pending'")
+        if result and len(result) > 0:
+            results = result[0].get("results", [])
+            if results:
+                return results[0].get("count", 0)
+        return 0
+
     def get_processed_urls_count(self, source=None):
         if source:
             result = self.execute("SELECT COUNT(*) as count FROM processed_urls WHERE source = ?", [source])
@@ -482,6 +514,7 @@ class ProgressTracker:
                 eta_minutes = remaining / rate if rate > 0 else 0
                 eta_hours, eta_mins = divmod(int(eta_minutes), 60)
                 
+                # Get pending count from D1 if possible, otherwise use local tracking
                 self.notifier.send_message(
                     f"<b>Scraper Progress</b>\n"
                     f"Category: {self.current_category}\n"
