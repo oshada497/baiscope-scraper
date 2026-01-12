@@ -527,59 +527,78 @@ class SubzLkScraper:
         
         total_discovered = 0
         
+        # Load state to resume if possible
+        resume_category, resume_page = None, None
+        if self.d1.enabled:
+            resume_category, resume_page = self.d1.get_state(source=self.source)
+            if resume_category:
+                logger.info(f"Resuming crawl from {resume_category} at page {resume_page}")
+        
+        start_crawling = False if resume_category else True
+        
         for category in categories:
-            page = 1
-            max_pages = limit_pages if limit_pages else 500
-            consecutive_empty = 0
+            # Skip categories until we reach the resume point
+            if not start_crawling:
+                if category == resume_category:
+                    start_crawling = True
+                    page = resume_page or 1
+                else:
+                    logger.info(f"Skipping already completed category: {category}")
+                    continue
+            else:
+                page = 1
+                
+            max_pages = limit_pages if limit_pages else 1000 # Increased limit
+            consecutive_failed = 0
             
-            logger.info(f"\n=== Crawling category: {category} ===")
+            logger.info(f"\n=== Crawling category: {category} (Starting at page {page}) ===")
             
             while page <= max_pages:
                 category_url = f"{self.base_url}{category}"
                 
-                # Check state to resume if needed (not fully implemented yet, just starting from 1)
-                
                 subtitle_urls = self.get_subtitle_urls_from_page(category_url, page)
                 
                 if subtitle_urls is None:
-                    consecutive_empty += 1
-                    if consecutive_empty >= 3:
+                    consecutive_failed += 1
+                    if consecutive_failed >= 3:
                         logger.info(f"Too many failed pages, moving to next category")
                         break
                     page += 1
                     continue
                 
-                # Filter what's already discovered or processed
+                # If page is empty (no links at all), we've reached the end of category
+                if not subtitle_urls:
+                    logger.info(f"Page {page} is empty. Category crawl complete.")
+                    break
+                
+                consecutive_failed = 0
                 new_items = 0
                 for url in subtitle_urls:
-                    # Check if already processed
+                    # Filter what's already discovered or processed
                     if self.d1.is_url_processed(url):
                         continue
                         
-                    # Check if already in telegram files (by some other means)
-                    # For now just add to discovered, D1 will ignore duplicates
-                    
                     # Add to discovered_urls with pending status
                     self._save_discovered_url(url, category, page)
                     new_items += 1
                 
-                if new_items == 0:
-                    consecutive_empty += 1
-                    if consecutive_empty >= 5: # More leniency for crawler
-                        logger.info(f"No new items found for 5 pages, assuming category is up to date")
-                        break
-                else:
-                    consecutive_empty = 0
-                    total_discovered += new_items
+                total_discovered += new_items
+                logger.info(f"Page {page}: Found {len(subtitle_urls)} links, {new_items} new pending (Total Discovered: {total_discovered})")
                 
-                logger.info(f"Page {page}: Found {len(subtitle_urls)} links, {new_items} new pending")
+                # Aggressive Check: If it's NOT a full crawl (limit_pages is set), 
+                # we can stop after some empty pages. But for FULL crawl, we keep going
+                # until the page itself is empty of any links.
+                if limit_pages and new_items == 0:
+                     # Monitoring logic: stop if we hit already processed stuff
+                     logger.info("Limit reached (already processed or page limit). Stopping category.")
+                     break
                 
-                # Save state
+                # Save state so we can resume if process dies
                 if self.d1.enabled:
                     self.d1.save_state(category, page, source=self.source)
                 
                 page += 1
-                time.sleep(random.uniform(1.0, 2.5)) # Faster than full processing
+                time.sleep(random.uniform(0.5, 1.5)) # Fast discovery phase
             
             time.sleep(2)
             
