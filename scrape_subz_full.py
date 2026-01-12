@@ -10,12 +10,24 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from subz_scraper import SubzLkScraper
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging to force output to stdout for Render
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
 
 
 def main():
-    """Full scrape of subz.lk - all categories and pages"""
+    """
+    Unified Scraper Entry Point
+    Executes the full pipeline:
+    1. Crawls all categories to discover new subtitles (stored in DB with status='pending')
+    2. Processes the queue to download and upload text/zip files (updates DB status)
+    """
     TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
     
