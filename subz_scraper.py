@@ -386,7 +386,7 @@ class SubzLkScraper:
     
     
     def process_queue_mode(self, limit=None):
-        """Process pending URLs from the database queue"""
+        """Process pending URLs from the database queue using parallel workers"""
         logger.info("Starting queue processing mode...")
         
         # Get pending count
@@ -394,13 +394,12 @@ class SubzLkScraper:
         
         self.telegram.send_message(
             f"<b>Subz.lk Processor Starting</b>\n"
-            f"Mode: Process Queue\n"
+            f"Mode: Process Queue (Parallel)\n"
             f"Pending items: {pending_count}"
         )
         
         processed_count = 0
         success_count = 0
-        consecutive_errors = 0
         
         while True:
             # Check limit
@@ -409,7 +408,9 @@ class SubzLkScraper:
                 break
                 
             # Get next batch of pending URLs
-            pending_urls = self.d1.get_pending_urls(limit=self.batch_size, source=self.source)
+            # Fetch slightly more than needed to keep workers busy
+            batch_fetch_size = min(self.batch_size, limit - processed_count) if limit else self.batch_size
+            pending_urls = self.d1.get_pending_urls(limit=batch_fetch_size, source=self.source)
             
             if not pending_urls:
                 logger.info("No more pending URLs in queue")
@@ -417,43 +418,27 @@ class SubzLkScraper:
                 
             logger.info(f"Fetched {len(pending_urls)} pending URLs from queue")
             
-            # Process batch
-            for row in pending_urls:
-                url = row.get("url")
-                if not url:
-                    continue
-                    
-                if limit and processed_count >= limit:
-                    break
+            # Prepare batch
+            urls_to_process = [row.get("url") for row in pending_urls if row.get("url")]
+            
+            # Process batch in parallel
+            logger.info(f"Processing batch of {len(urls_to_process)} with {self.num_workers} workers")
+            
+            with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+                futures = {executor.submit(self._process_single_url, url): url for url in urls_to_process}
                 
-                # Update status to processing (optional, but good for visibility)
-                # self.d1.update_url_status(url, 'processing')
-                
-                try:
-                    logger.info(f"Processing queue item {processed_count+1}: {url}")
-                    result, title = self.download_and_process_subtitle(url)
-                    
-                    processed_count += 1
-                    if result:
-                        success_count += 1
-                        consecutive_errors = 0
-                    else:
-                        consecutive_errors += 1
-                        
-                    # Status update is handled inside download_and_process_subtitle -> _mark_url_processed -> d1.add_processed_url
-                    # add_processed_url calls update_url_status internally
-                    
-                    if consecutive_errors >= 10:
-                        logger.warning("Too many consecutive errors, cooling down...")
-                        time.sleep(30)
-                        consecutive_errors = 0
-                        
-                    time.sleep(random.uniform(2.0, 5.0))
-                    
-                except Exception as e:
-                    logger.error(f"Error processing {url}: {e}")
-                    self.d1.update_url_status(url, 'failed')
-                    consecutive_errors += 1
+                for future in as_completed(futures):
+                    url = futures[future]
+                    try:
+                        result = future.result()
+                        processed_count += 1
+                        if result:
+                            success_count += 1
+                    except Exception as e:
+                        logger.error(f"Worker error for {url}: {e}")
+            
+            # Optional: Small cooldown between batches to be "secure"
+            time.sleep(random.uniform(1.0, 3.0))
         
         self.telegram.send_message(
             f"<b>Subz.lk Processing Complete!</b>\n"

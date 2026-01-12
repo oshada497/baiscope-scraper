@@ -337,8 +337,9 @@ class TelegramUploader:
         self.base_url = f"https://api.telegram.org/bot{bot_token}"
         self.enabled = bool(bot_token and chat_id)
         self.last_request_time = 0
-        self.min_delay = 0.1
-        self.rate_limit_delay = 1.0
+        # Increased delays for safety and to prevent "Flood Wait" errors
+        self.min_delay = 1.0 
+        self.rate_limit_delay = 2.0
         self.consecutive_429s = 0
         
     def _wait_for_rate_limit(self):
