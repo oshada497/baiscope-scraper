@@ -115,7 +115,7 @@ class CloudflareD1:
                     url TEXT UNIQUE NOT NULL,
                     category TEXT,
                     page INTEGER,
-                    source TEXT DEFAULT 'baiscope',
+                    source TEXT DEFAULT 'subz',
                     status TEXT DEFAULT 'pending',
                     discovered_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
@@ -127,7 +127,7 @@ class CloudflareD1:
                     url TEXT UNIQUE NOT NULL,
                     success INTEGER DEFAULT 0,
                     title TEXT,
-                    source TEXT DEFAULT 'baiscope',
+                    source TEXT DEFAULT 'subz',
                     processed_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -137,7 +137,7 @@ class CloudflareD1:
                     id INTEGER PRIMARY KEY,
                     current_category TEXT,
                     current_page INTEGER,
-                    source TEXT DEFAULT 'baiscope',
+                    source TEXT DEFAULT 'subz',
                     last_updated TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -153,7 +153,7 @@ class CloudflareD1:
                     title TEXT,
                     source_url TEXT,
                     category TEXT,
-                    source TEXT DEFAULT 'baiscope',
+                    source TEXT DEFAULT 'subz',
                     message_id INTEGER,
                     uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
@@ -161,11 +161,7 @@ class CloudflareD1:
             
             # Try to add columns if they don't exist (migrations)
             schema_updates = [
-                "ALTER TABLE telegram_files ADD COLUMN source TEXT DEFAULT 'baiscope'",
-                "ALTER TABLE discovered_urls ADD COLUMN source TEXT DEFAULT 'baiscope'",
-                "ALTER TABLE discovered_urls ADD COLUMN status TEXT DEFAULT 'pending'",
-                "ALTER TABLE processed_urls ADD COLUMN source TEXT DEFAULT 'baiscope'",
-                "ALTER TABLE scraper_state ADD COLUMN source TEXT DEFAULT 'baiscope'"
+                "ALTER TABLE scraper_state ADD COLUMN source TEXT DEFAULT 'subz'"
             ]
             
             # Try to add columns if they don't exist (migrations)
@@ -214,13 +210,13 @@ class CloudflareD1:
                 logger.error(f"D1 execute error: {e}")
             return None
     
-    def add_discovered_url(self, url, category="", page=0, source="baiscope"):
+    def add_discovered_url(self, url, category="", page=0, source="subz"):
         return self.execute(
             "INSERT OR IGNORE INTO discovered_urls (url, category, page, source, status) VALUES (?, ?, ?, ?, 'pending')",
             [url, category, page, source]
         )
     
-    def get_pending_urls(self, limit=10, source="baiscope"):
+    def get_pending_urls(self, limit=10, source="subz"):
         """Get a list of pending URLs to process"""
         result = self.execute(
             "SELECT url, category FROM discovered_urls WHERE status = 'pending' AND source = ? LIMIT ?", 
@@ -237,7 +233,7 @@ class CloudflareD1:
             [status, url]
         )
 
-    def add_processed_url(self, url, success=False, title="", source="baiscope"):
+    def add_processed_url(self, url, success=False, title="", source="subz"):
         # Update both tables - mark as completed in discovered, add to processed
         self.update_url_status(url, 'completed' if success else 'failed')
         
@@ -295,13 +291,13 @@ class CloudflareD1:
                 return results[0].get("count", 0)
         return 0
     
-    def save_state(self, category, page, source="baiscope"):
+    def save_state(self, category, page, source="subz"):
         return self.execute(
             "INSERT OR REPLACE INTO scraper_state (id, current_category, current_page, source, last_updated) VALUES (?, ?, ?, ?, datetime('now'))",
             [hash(source) % 1000000, category, page, source]  # Use hash of source as id
         )
     
-    def get_state(self, source="baiscope"):
+    def get_state(self, source="subz"):
         result = self.execute("SELECT current_category, current_page FROM scraper_state WHERE source = ?", [source])
         if result and len(result) > 0:
             results = result[0].get("results", [])
@@ -327,7 +323,7 @@ class CloudflareD1:
             return set(row.get("normalized_filename", "") for row in result[0].get("results", []) if row.get("normalized_filename"))
         return set()
     
-    def save_telegram_file_with_normalized(self, file_id, file_unique_id, filename, normalized_filename, file_size, title, source_url, category, message_id, source="baiscope"):
+    def save_telegram_file_with_normalized(self, file_id, file_unique_id, filename, normalized_filename, file_size, title, source_url, category, message_id, source="subz"):
         return self.execute(
             """INSERT OR REPLACE INTO telegram_files 
                (file_id, file_unique_id, filename, normalized_filename, file_size, title, source_url, category, source, message_id, uploaded_at) 
