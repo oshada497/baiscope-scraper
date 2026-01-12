@@ -202,12 +202,19 @@ def status():
     }
     
     # Add D1 stats if available
+    # Add D1 stats if available (use cached stats to avoid timeout)
     for site, scraper in current_scrapers.items():
-        if scraper and hasattr(scraper, 'd1') and scraper.d1.enabled:
-            response['scrapers'][site]['d1_stats'] = {
-                'discovered': scraper.d1.get_discovered_urls_count(source=scraper.source if hasattr(scraper, 'source') else site),
-                'processed': scraper.d1.get_processed_urls_count(source=scraper.source if hasattr(scraper, 'source') else site)
-            }
+        if scraper and hasattr(scraper, 'stats'):
+             response['scrapers'][site]['d1_stats'] = scraper.stats
+        elif scraper and hasattr(scraper, 'd1') and scraper.d1.enabled:
+             # Fallback (careful with timeouts)
+             try:
+                response['scrapers'][site]['d1_stats'] = {
+                    'discovered': scraper.d1.get_discovered_urls_count(source=scraper.source if hasattr(scraper, 'source') else site),
+                    'processed': scraper.d1.get_processed_urls_count(source=scraper.source if hasattr(scraper, 'source') else site)
+                }
+             except Exception:
+                response['scrapers'][site]['d1_stats'] = {'error': 'timeout'}
     
     return jsonify(response)
 

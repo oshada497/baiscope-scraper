@@ -521,6 +521,7 @@ class BaiscopeScraperTelegram:
         self.current_category = ""
         self.lock = threading.Lock()
         self.num_workers = 3
+        self.stats = self._init_stats()
     
     def _setup_signal_handlers(self):
         def signal_handler(signum, frame):
@@ -568,6 +569,17 @@ class BaiscopeScraperTelegram:
                 return filenames
         return set()
     
+    def _init_stats(self):
+        """Initialize stats from D1 once on startup"""
+        stats = {'discovered': 0, 'processed': 0}
+        if self.d1.enabled:
+            try:
+                stats['discovered'] = self.d1.get_discovered_urls_count()
+                stats['processed'] = self.d1.get_processed_urls_count()
+            except Exception as e:
+                logger.error(f"Error initializing stats: {e}")
+        return stats
+    
     def _save_state_local(self):
         try:
             state = {
@@ -586,10 +598,16 @@ class BaiscopeScraperTelegram:
         
         if self.d1.enabled:
             self.d1.add_processed_url(url, success, title)
+            # Update local stats
+            if hasattr(self, 'stats'):
+                self.stats['processed'] += 1
     
     def _save_discovered_url(self, url, category="", page=0):
         if self.d1.enabled:
             self.d1.add_discovered_url(url, category, page)
+            # Update local stats
+            if hasattr(self, 'stats'):
+                self.stats['discovered'] += 1
     
     def _save_resume_state(self, category, page):
         if self.d1.enabled:

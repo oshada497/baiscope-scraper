@@ -58,6 +58,8 @@ class SubzLkScraper:
         self.lock = threading.Lock()
         self.num_workers = 3
         
+        self.stats = self._init_stats()
+        
     def _load_processed_urls(self):
         if self.d1.enabled:
             urls = self.d1.get_all_processed_urls(source=self.source)
@@ -67,6 +69,19 @@ class SubzLkScraper:
         logger.info("No previous state found for subz.lk, starting fresh")
         return set()
     
+        return set()
+    
+    def _init_stats(self):
+        """Initialize stats from D1 once on startup"""
+        stats = {'discovered': 0, 'processed': 0}
+        if self.d1.enabled:
+            try:
+                stats['discovered'] = self.d1.get_discovered_urls_count(source=self.source)
+                stats['processed'] = self.d1.get_processed_urls_count(source=self.source)
+            except Exception as e:
+                logger.error(f"Error initializing stats: {e}")
+        return stats
+
     def _load_existing_filenames(self):
         if self.d1.enabled:
             # Check only THIS source (subz) for duplicates
@@ -80,10 +95,16 @@ class SubzLkScraper:
         self.processed_urls.add(url)
         if self.d1.enabled:
             self.d1.add_processed_url(url, success, title, source=self.source)
+            # Update local stats
+            if hasattr(self, 'stats'):
+                self.stats['processed'] += 1
     
     def _save_discovered_url(self, url, category="", page=0):
         if self.d1.enabled:
             self.d1.add_discovered_url(url, category, page, source=self.source)
+            # Update local stats
+            if hasattr(self, 'stats'):
+                self.stats['discovered'] += 1
     
     def get_page(self, url, retries=6):
         """Fetch a page with retries and anti-blocking measures"""
