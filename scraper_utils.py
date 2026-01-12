@@ -186,7 +186,8 @@ class CloudflareD1:
                 "UPDATE telegram_files SET source = 'subz' WHERE source = 'baiscope'",
                 "UPDATE discovered_urls SET source = 'subz' WHERE source = 'baiscope'",
                 "UPDATE processed_urls SET source = 'subz' WHERE source = 'baiscope'",
-                "UPDATE scraper_state SET source = 'subz' WHERE source = 'baiscope'"
+                "UPDATE scraper_state SET source = 'subz' WHERE source = 'baiscope'",
+                "UPDATE discovered_urls SET status = 'failed' WHERE url NOT LIKE '%subz.lk%'"
             ]
             
             for sql in migrations:
@@ -474,17 +475,28 @@ class ProgressTracker:
         self.success = 0
         self.failed = 0
         self.start_time = None
-        self.running = False
+        self.stop_event = threading.Event()
         self.thread = None
         self.current_page = 0
         self.current_category = ""
         
     def start(self, total_found):
+        # Reset counters for the new batch
         self.total_found = total_found
+        self.processed = 0
+        self.success = 0
+        self.failed = 0
         self.start_time = time.time()
-        self.running = True
+        
+        # Ensure previous thread is stopped
+        if self.thread and self.thread.is_alive():
+            self.stop_event.set()
+            self.thread.join(timeout=2)
+            
+        self.stop_event.clear()
         self.thread = threading.Thread(target=self._notification_loop, daemon=True)
         self.thread.start()
+        
         self.notifier.send_message(
             f"<b>Scraper Started</b>\n"
             f"Total subtitles to process: {total_found}"
@@ -502,22 +514,32 @@ class ProgressTracker:
         self.current_page = page
             
     def stop(self):
-        self.running = False
+        self.stop_event.set()
         elapsed = time.time() - self.start_time if self.start_time else 0
         hours, remainder = divmod(int(elapsed), 3600)
         minutes, seconds = divmod(remainder, 60)
-        self.notifier.send_message(
-            f"<b>Scraping Complete!</b>\n"
-            f"Processed: {self.processed}/{self.total_found}\n"
-            f"Success: {self.success}\n"
-            f"Failed: {self.failed}\n"
-            f"Time: {hours}h {minutes}m {seconds}s"
-        )
+        
+        # Don't send final message if we didn't actually process anything (to avoid noise)
+        if self.processed > 0:
+            self.notifier.send_message(
+                f"<b>Scraping Complete!</b>\n"
+                f"Processed: {self.processed}/{self.total_found}\n"
+                f"Success: {self.success}\n"
+                f"Failed: {self.failed}\n"
+                f"Time: {hours}h {minutes}m {seconds}s"
+            )
+            # Reset counters after stop to prevent bleed-over to next run
+            self.processed = 0
+            self.success = 0
+            self.failed = 0
         
     def _notification_loop(self):
-        while self.running:
-            time.sleep(self.interval)
-            if self.running and self.total_found > 0:
+        while not self.stop_event.is_set():
+            # Wait for interval or until stopped
+            if self.stop_event.wait(timeout=self.interval):
+                break
+                
+            if self.total_found > 0 and self.processed > 0:
                 elapsed = time.time() - self.start_time
                 hours, remainder = divmod(int(elapsed), 3600)
                 minutes, seconds = divmod(remainder, 60)
@@ -527,7 +549,6 @@ class ProgressTracker:
                 eta_minutes = remaining / rate if rate > 0 else 0
                 eta_hours, eta_mins = divmod(int(eta_minutes), 60)
                 
-                # Get pending count from D1 if possible, otherwise use local tracking
                 self.notifier.send_message(
                     f"<b>Scraper Progress</b>\n"
                     f"Category: {self.current_category}\n"
@@ -538,3 +559,4 @@ class ProgressTracker:
                     f"Elapsed: {hours}h {minutes}m\n"
                     f"ETA: ~{eta_hours}h {eta_mins}m"
                 )
+

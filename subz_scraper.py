@@ -155,9 +155,17 @@ class SubzLkScraper:
     def _process_one(self, url):
         """Download and upload a single subtitle"""
         try:
+            # 0. Basic Validation
+            if not url or 'subz.lk' not in url.lower():
+                logger.warning(f"Skipping invalid/non-subz URL: {url}")
+                self.d1.add_processed_url(url, False, "Invalid Source", source=self.source)
+                return False
+
             # 1. Fetch detail page
             res = self.get_page(url)
-            if not res: return False
+            if not res:
+                logger.warning(f"Link Failed (404 or Timeout): {url}")
+                return False
             
             soup = BeautifulSoup(res.text, 'html.parser')
             title_node = soup.find('h2', class_='subz_title') or soup.find('h1')
@@ -165,18 +173,24 @@ class SubzLkScraper:
             
             # 2. Extract Download Params
             dl_btn = soup.find('a', class_='sub-download')
-            if not dl_btn: return False
+            if not dl_btn:
+                logger.warning(f"No Download Button: {url} (Title: {title})")
+                return False
             
             href = dl_btn.get('href', '')
             sub_id = re.search(r'sub_id=(\d+)', href)
             nonce = re.search(r'nonce=([^&]+)', href)
             
-            if not sub_id or not nonce: return False
+            if not sub_id or not nonce:
+                logger.warning(f"Missing ID/Nonce in button: {url} (Title: {title})")
+                return False
             
             # 3. Download File
             dl_url = f"{self.base_url}/wp-admin/admin-ajax.php?action=sub_download&sub_id={sub_id.group(1)}&nonce={nonce.group(1)}"
             file_res = self.get_page(dl_url)
-            if not file_res: return False
+            if not file_res:
+                logger.warning(f"File Download Failed: {dl_url}")
+                return False
             
             # 4. Handle Metadata & File naming
             clean_title = re.sub(r'[^\w\s-]', '', title).strip()[:100]
@@ -184,14 +198,17 @@ class SubzLkScraper:
             filename = f"{clean_title}{ext}"
             norm_name = normalize_filename(filename)
             
-            # Duplicate check
+            logger.info(f"Downloading: {title} -> {filename}")
+
+            # 5. Duplicate check
             with self.lock:
                 if norm_name in self.existing_filenames:
+                    logger.info(f"Skipping Duplicate (Filename): {filename}")
                     self.d1.add_processed_url(url, True, title, source=self.source)
                     self.processed_urls.add(url)
                     return True
 
-            # 5. Telegram Upload
+            # 6. Telegram Upload
             caption = f"<b>{title}</b>\n\nSource: Subz.lk\nLink: {url}"
             file_info = self.telegram.send_document(file_res.content, filename, caption)
             
@@ -202,7 +219,7 @@ class SubzLkScraper:
                         file_unique_id=file_info.get('file_unique_id', ''),
                         filename=filename,
                         normalized_filename=norm_name,
-                        file_size=file_res.headers.get('Content-Length', 0),
+                        file_size=len(file_res.content),
                         title=title,
                         source_url=url,
                         category="",
@@ -214,11 +231,15 @@ class SubzLkScraper:
                         self.processed_urls.add(url)
                         self.existing_filenames.add(norm_name)
                         self.stats['processed'] += 1
+                logger.info(f"Successfully uploaded: {filename}")
                 return True
+            
+            logger.warning(f"Telegram Upload Failed: {filename}")
             return False
         except Exception as e:
-            logger.error(f"Error processing {url}: {e}")
+            logger.error(f"Critical error processing {url}: {e}", exc_info=True)
             return False
+
 
     def process_queue_mode(self, limit=None):
         """Step 2: Take pending URLs from D1 and process in parallel"""
