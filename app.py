@@ -1,133 +1,259 @@
+"""
+Flask web app for running scrapers on Render.com
+Supports both baiscope.lk and subz.lk with monitoring mode
+"""
 import os
 import threading
 import time
-from flask import Flask, jsonify
-from main import BaiscopeScraperTelegram
+from flask import Flask, jsonify, request
 import logging
+import sys
+
+# Add current directory to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from subz_scraper import SubzLkScraper
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# Global status tracking
 scraper_status = {
-    'status': 'initializing',
-    'start_time': None,
-    'processed_urls': 0,
-    'success': 0,
-    'failed': 0
+    'baiscope': {
+        'status': 'idle',
+        'last_run': None,
+        'processed': 0,
+        'success': 0
+    },
+    'subz': {
+        'status': 'idle',
+        'last_run': None,
+        'processed': 0,
+        'success': 0
+    }
 }
 
-current_scraper = None
-scraper_thread = None
+current_scrapers = {
+    'baiscope': None,
+    'subz': None
+}
 
-def run_scraper():
-    global current_scraper, scraper_status
+scraper_threads = {
+    'baiscope': None,
+    'subz': None
+}
+
+
+def get_credentials():
+    """Get credentials from environment variables"""
+    return {
+        'telegram_token': os.environ.get('TELEGRAM_BOT_TOKEN'),
+        'telegram_chat_id': os.environ.get('TELEGRAM_CHAT_ID', '-1003442794989'),
+        'cf_account_id': os.environ.get('CF_ACCOUNT_ID') or os.environ.get('CLOUDFLARE_ACCOUNT_ID'),
+        'cf_api_token': os.environ.get('CF_API_TOKEN') or os.environ.get('CLOUDFLARE_API_TOKEN'),
+        'd1_database_id': os.environ.get('D1_DATABASE_ID')
+    }
+
+
+def run_monitoring_job():
+    """Run monitoring for both sites (called periodically)"""
+    global current_scrapers, scraper_status
     
-    TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-    TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '-1003442794989')
+    creds = get_credentials()
     
-    CF_ACCOUNT_ID = os.environ.get('CF_ACCOUNT_ID') or os.environ.get('CLOUDFLARE_ACCOUNT_ID')
-    CF_API_TOKEN = os.environ.get('CF_API_TOKEN') or os.environ.get('CLOUDFLARE_API_TOKEN')
-    D1_DATABASE_ID = os.environ.get('D1_DATABASE_ID')
-    
-    if not TELEGRAM_BOT_TOKEN:
+    if not creds['telegram_token']:
         logger.error("Missing TELEGRAM_BOT_TOKEN!")
-        scraper_status['status'] = 'error: missing telegram token'
         return
     
-    if not all([CF_ACCOUNT_ID, CF_API_TOKEN, D1_DATABASE_ID]):
-        logger.warning("D1 database credentials not set - using local file storage")
+    logger.info("="*60)
+    logger.info("STARTING PERIODIC MONITORING")
+    logger.info("="*60)
     
-    BATCH_SIZE = int(os.environ.get('BATCH_SIZE', 50))
-    
-    scraper_status['status'] = 'starting'
-    scraper_status['start_time'] = time.strftime('%Y-%m-%d %H:%M:%S')
-    
-    current_scraper = BaiscopeScraperTelegram(
-        telegram_token=TELEGRAM_BOT_TOKEN,
-        telegram_chat_id=TELEGRAM_CHAT_ID,
-        cf_account_id=CF_ACCOUNT_ID,
-        cf_api_token=CF_API_TOKEN,
-        d1_database_id=D1_DATABASE_ID,
-        batch_size=BATCH_SIZE
-    )
-    
-    scraper_status['status'] = 'running'
-    scraper_status['processed_urls'] = len(current_scraper.processed_urls)
-    
+    # Monitor Subz.lk
     try:
-        result = current_scraper.scrape_all()
-        scraper_status['status'] = 'completed'
-        scraper_status['success'] = result
+        scraper_status['subz']['status'] = 'running'
+        scraper_status['subz']['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
+        
+        subz_scraper = SubzLkScraper(
+            telegram_token=creds['telegram_token'],
+            telegram_chat_id=creds['telegram_chat_id'],
+            cf_account_id=creds['cf_account_id'],
+            cf_api_token=creds['cf_api_token'],
+            d1_database_id=creds['d1_database_id']
+        )
+        
+        current_scrapers['subz'] = subz_scraper
+        result = subz_scraper.monitor_new_subtitles()
+        
+        scraper_status['subz']['status'] = 'idle'
+        scraper_status['subz']['success'] = result
+        scraper_status['subz']['processed'] = len(subz_scraper.processed_urls)
+        
+        logger.info(f"Subz.lk monitoring complete: {result} new subtitles")
+        
     except Exception as e:
-        logger.error(f"Scraper error: {e}")
-        scraper_status['status'] = f'error: {str(e)[:100]}'
-    finally:
-        if current_scraper:
-            scraper_status['processed_urls'] = len(current_scraper.processed_urls)
-
-def start_scraper_if_needed():
-    global scraper_thread
+        logger.error(f"Error monitoring subz.lk: {e}", exc_info=True)
+        scraper_status['subz']['status'] = f'error: {str(e)[:100]}'
     
-    if scraper_thread is None or not scraper_thread.is_alive():
-        scraper_thread = threading.Thread(target=run_scraper, daemon=True)
-        scraper_thread.start()
-        logger.info("Scraper thread started")
+    # Monitor Baiscope.lk (check recent pages only)
+    try:
+        from main import BaiscopeScraperTelegram
+        
+        scraper_status['baiscope']['status'] = 'running'
+        scraper_status['baiscope']['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
+        
+        baiscope_scraper = BaiscopeScraperTelegram(
+            telegram_token=creds['telegram_token'],
+            telegram_chat_id=creds['telegram_chat_id'],
+            cf_account_id=creds['cf_account_id'],
+            cf_api_token=creds['cf_api_token'],
+            d1_database_id=creds['d1_database_id']
+        )
+        
+        current_scrapers['baiscope'] = baiscope_scraper
+        
+        # Check first 3 pages of main category for new content
+        category = "/category/sinhala-subtitles/"
+        new_count = 0
+        
+        for page in range(1, 4):
+            subtitle_urls = baiscope_scraper.get_subtitle_urls_from_page(category, page)
+            if subtitle_urls:
+                new_urls = [url for url in subtitle_urls if url not in baiscope_scraper.processed_urls]
+                if new_urls:
+                    logger.info(f"Baiscope page {page}: {len(new_urls)} new URLs")
+                    success = baiscope_scraper.process_page_subtitles(new_urls)
+                    new_count += success
+        
+        scraper_status['baiscope']['status'] = 'idle'
+        scraper_status['baiscope']['success'] = new_count
+        scraper_status['baiscope']['processed'] = len(baiscope_scraper.processed_urls)
+        
+        logger.info(f"Baiscope.lk monitoring complete: {new_count} new subtitles")
+        
+    except Exception as e:
+        logger.error(f"Error monitoring baiscope.lk: {e}", exc_info=True)
+        scraper_status['baiscope']['status'] = f'error: {str(e)[:100]}'
+    
+    logger.info("="*60)
+    logger.info("MONITORING CYCLE COMPLETE")
+    logger.info("="*60)
 
-start_scraper_if_needed()
+
+def start_monitoring_loop():
+    """Background thread that runs monitoring periodically"""
+    logger.info("Starting monitoring loop (runs every 15 minutes)")
+    
+    while True:
+        try:
+            run_monitoring_job()
+        except Exception as e:
+            logger.error(f"Error in monitoring loop: {e}", exc_info=True)
+        
+        # Wait 15 minutes before next run
+        logger.info("Waiting 15 minutes until next monitoring cycle...")
+        time.sleep(15 * 60)
+
+
+# Start monitoring loop in background
+monitoring_thread = threading.Thread(target=start_monitoring_loop, daemon=True)
+monitoring_thread.start()
+
 
 @app.route('/')
 def health():
-    return 'Baiscope Subtitle Scraper - Telegram + D1 Storage Mode', 200
+    """Health check endpoint"""
+    return jsonify({
+        'service': 'BiScope & Subz.lk Subtitle Scraper',
+        'mode': 'Monitoring (15 min intervals)',
+        'status': 'running',
+        'endpoints': [
+            '/status - View scraper status',
+            '/trigger - Manually trigger monitoring',
+            '/scrape/subz - Full scrape of subz.lk',
+        ]
+    }), 200
+
 
 @app.route('/status')
 def status():
-    global current_scraper, scraper_status
-    
+    """Get current status of both scrapers"""
     response = {
-        'status': scraper_status['status'],
-        'start_time': scraper_status['start_time'],
-        'total_processed': scraper_status['processed_urls'],
-        'storage': 'telegram + d1'
+        'monitoring_interval': '15 minutes',
+        'scrapers': scraper_status
     }
     
-    if current_scraper:
-        response['total_processed'] = len(current_scraper.processed_urls)
-        
-        if current_scraper.d1.enabled:
-            response['d1_discovered'] = current_scraper.d1.get_discovered_urls_count()
-            response['d1_processed'] = current_scraper.d1.get_processed_urls_count()
-        
-        if hasattr(current_scraper, 'tracker'):
-            tracker = current_scraper.tracker
-            response['current_progress'] = {
-                'processed': tracker.processed,
-                'success': tracker.success,
-                'failed': tracker.failed,
-                'current_category': tracker.current_category,
-                'current_page': tracker.current_page
+    # Add D1 stats if available
+    for site, scraper in current_scrapers.items():
+        if scraper and hasattr(scraper, 'd1') and scraper.d1.enabled:
+            response['scrapers'][site]['d1_stats'] = {
+                'discovered': scraper.d1.get_discovered_urls_count(source=scraper.source if hasattr(scraper, 'source') else site),
+                'processed': scraper.d1.get_processed_urls_count(source=scraper.source if hasattr(scraper, 'source') else site)
             }
     
     return jsonify(response)
 
-@app.route('/restart')
-def restart():
-    global scraper_thread, current_scraper, scraper_status
+
+@app.route('/trigger')
+def trigger_monitoring():
+    """Manually trigger a monitoring cycle"""
+    thread = threading.Thread(target=run_monitoring_job, daemon=True)
+    thread.start()
     
-    if scraper_thread and scraper_thread.is_alive():
-        return jsonify({'error': 'Scraper is still running'}), 400
+    return jsonify({
+        'message': 'Monitoring cycle triggered',
+        'note': 'Check /status for progress'
+    })
+
+
+@app.route('/scrape/subz')
+def scrape_subz_full():
+    """Trigger full scrape of subz.lk (run once for initial setup)"""
+    global scraper_threads
     
-    scraper_status = {
-        'status': 'restarting',
-        'start_time': None,
-        'processed_urls': 0,
-        'success': 0,
-        'failed': 0
-    }
+    if scraper_threads['subz'] and scraper_threads['subz'].is_alive():
+        return jsonify({'error': 'Subz scraper is already running'}), 400
     
-    start_scraper_if_needed()
-    return jsonify({'message': 'Scraper restarted'})
+    def run_full_scrape():
+        global current_scrapers, scraper_status
+        
+        creds = get_credentials()
+        
+        try:
+            scraper_status['subz']['status'] = 'full_scrape_running'
+            scraper_status['subz']['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
+            
+            scraper = SubzLkScraper(
+                telegram_token=creds['telegram_token'],
+                telegram_chat_id=creds['telegram_chat_id'],
+                cf_account_id=creds['cf_account_id'],
+                cf_api_token=creds['cf_api_token'],
+                d1_database_id=creds['d1_database_id']
+            )
+            
+            current_scrapers['subz'] = scraper
+            result = scraper.scrape_all_categories()
+            
+            scraper_status['subz']['status'] = 'idle'
+            scraper_status['subz']['success'] = result
+            scraper_status['subz']['processed'] = len(scraper.processed_urls)
+            
+        except Exception as e:
+            logger.error(f"Error in full scrape: {e}", exc_info=True)
+            scraper_status['subz']['status'] = f'error: {str(e)[:100]}'
+    
+    scraper_threads['subz'] = threading.Thread(target=run_full_scrape, daemon=True)
+    scraper_threads['subz'].start()
+    
+    return jsonify({
+        'message': 'Full scrape of subz.lk started',
+        'note': 'This will take several hours. Check /status for progress'
+    })
+
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    port = int(os.environ.get('PORT', 5000))
+    logger.info(f"Starting Flask app on port {port}")
+    app.run(host='0.0.0.0', port=port)

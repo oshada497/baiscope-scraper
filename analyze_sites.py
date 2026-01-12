@@ -21,7 +21,6 @@ def get_page(url):
 
 sites = [
     "https://cineru.lk/",
-    "https://sinhalasub.lk/home/",
     "https://subz.lk/",
     "https://zoom.lk/"
 ]
