@@ -19,7 +19,7 @@ Ensure all your latest changes (including `scrape_subz_full.py` and `requirement
     *   **Name**: `subz-scraper-bot`
     *   **Runtime**: `Python 3`
     *   **Build Command**: `pip install -r requirements.txt`
-    *   **Start Command**: `gunicorn app:app --timeout 600`
+    *   **Start Command**: `gunicorn app:app --timeout 600 --access-logfile - --error-logfile -`
     *   **Instance Type**: `Starter` ($7/mo) is recommended for 24/7 uptime. Free tier will sleep after 15 minutes of inactivity.
 
 ### Step 3: Environment Variables
