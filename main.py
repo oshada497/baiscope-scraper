@@ -159,12 +159,12 @@ class CloudflareD1:
             # Try to add columns if they don't exist (migrations)
             try:
                 # Check if column exists first or just catch the error
-                self.execute("ALTER TABLE telegram_files ADD COLUMN normalized_filename TEXT")
+                self.execute("ALTER TABLE telegram_files ADD COLUMN normalized_filename TEXT", log_error=False)
             except Exception:
                 pass # Column likely exists
             
             try:
-                self.execute("CREATE INDEX IF NOT EXISTS idx_normalized_filename ON telegram_files(normalized_filename)")
+                self.execute("CREATE INDEX IF NOT EXISTS idx_normalized_filename ON telegram_files(normalized_filename)", log_error=False)
             except Exception:
                 pass
 
@@ -172,7 +172,7 @@ class CloudflareD1:
         except Exception as e:
             logger.error(f"Failed to initialize D1 tables: {e}")
     
-    def execute(self, sql, params=None):
+    def execute(self, sql, params=None, log_error=True):
         if not self.enabled:
             return None
             
@@ -187,10 +187,12 @@ class CloudflareD1:
             if data.get("success"):
                 return data.get("result", [])
             else:
-                logger.error(f"D1 query error: {data.get('errors')}")
+                if log_error:
+                    logger.error(f"D1 query error: {data.get('errors')}")
                 return None
         except Exception as e:
-            logger.error(f"D1 execute error: {e}")
+            if log_error:
+                logger.error(f"D1 execute error: {e}")
             return None
     
     def add_discovered_url(self, url, category="", page=0):
@@ -613,7 +615,7 @@ class BaiscopeScraperTelegram:
                     'Cache-Control': 'max-age=0',
                     'Connection': 'keep-alive',
                     'Upgrade-Insecure-Requests': '1',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    # Let curl_cffi handle User-Agent for better impersonation
                     'Sec-Fetch-Dest': 'document',
                     'Sec-Fetch-Mode': 'navigate',
                     'Sec-Fetch-Site': 'none',
