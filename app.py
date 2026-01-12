@@ -60,8 +60,13 @@ def get_credentials():
 
 def run_monitoring_job():
     """Run monitoring for Subz.lk (called periodically)"""
-    global current_scraper, scraper_status
+    global current_scraper, scraper_status, scraper_thread
     
+    # Check if a full scrape is already running
+    if scraper_thread and scraper_thread.is_alive():
+        logger.info("Skip monitoring: Full scrape is currently active.")
+        return
+        
     creds = get_credentials()
     
     if not creds['telegram_token']:
@@ -69,11 +74,11 @@ def run_monitoring_job():
         return
     
     logger.info("="*60)
-    logger.info("STARTING SUBZ.LK MONITORING")
+    logger.info("STARTING SUBZ.LK MONITORING CYCLE")
     logger.info("="*60)
     
     try:
-        scraper_status['status'] = 'running'
+        scraper_status['status'] = 'monitoring'
         scraper_status['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
         
         scraper = SubzLkScraper(
@@ -144,14 +149,22 @@ def health():
 def status():
     """Get current status of Subz.lk scraper"""
     response = {
-        'monitoring_interval': '15 minutes',
-        'subz': scraper_status
+        'service_info': {
+            'name': 'Subz.lk Dedicated Scraper',
+            'auto_monitor_interval': '15 minutes',
+            'render_note': 'Service sleeps after 15m inactivity on Free Tier'
+        },
+        'scraper': scraper_status,
+        'diagnostics': {
+            'thread_active': scraper_thread.is_alive() if scraper_thread else False,
+            'pid': os.getpid()
+        }
     }
     
     if current_scraper:
-        response['subz']['d1_stats'] = current_scraper.stats
+        response['scraper']['d1_stats'] = current_scraper.stats
         if hasattr(current_scraper, 'initialization_status'):
-            response['subz']['init_status'] = current_scraper.initialization_status
+            response['scraper']['init_status'] = current_scraper.initialization_status
             
     return jsonify(response)
 

@@ -429,11 +429,11 @@ class SubzLkScraper:
         new_urls = [url for url in all_urls if url not in self.processed_urls]
         
         if not new_urls:
-            logger.info("No new subtitles found")
-            self.telegram.send_message("<b>No new subtitles found on subz.lk</b>")
+            logger.info(f"Monitoring: No new subtitles found. (Already tracked {len(self.processed_urls)} in D1)")
+            self.telegram.send_message(f"<b>No new subtitles found</b> (Checked homepage, all items already in D1)")
             return 0
         
-        logger.info(f"Found {len(new_urls)} new subtitles to process")
+        logger.info(f"Monitoring: Found {len(new_urls)} NEW subtitles on homepage. (Historical Total in D1: {len(self.processed_urls)})")
         
         if limit:
             new_urls = new_urls[:limit]
