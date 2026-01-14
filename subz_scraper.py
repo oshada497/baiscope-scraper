@@ -145,12 +145,15 @@ class SubzLkScraper:
                 if self.d1.enabled:
                     self.d1.save_state(category, page, source=self.source)
                 
-                # If page is empty or we hit an obvious end, break
-                if not links: break
+                # Only break if page is truly empty (no links at all)
+                if not links:
+                    logger.info(f"Category {category}: Page {page} returned no links. End of category.")
+                    break
                 
-                # For monitoring (limit_pages set), stop if we hit 0 new items
+                # For monitoring mode only (limit_pages set), stop if we hit 0 new items
+                # During full scrape, we continue checking all pages even if they're duplicates
                 if limit_pages and new_on_page == 0:
-                    logger.info("Monitoring: No new items on this page, assuming up to date.")
+                    logger.info("Monitoring mode: No new items on this page, assuming up to date.")
                     break
                     
                 page += 1
@@ -283,11 +286,20 @@ class SubzLkScraper:
         return processed_count
 
     def scrape_all_categories(self, limit=None):
-        """Unified Master Method"""
-        # 1. Discover everything first
-        self.crawl_only()
-        # 2. Update stats and process
+        """Unified Master Method - Full Historical Scrape"""
+        logger.info(">>> STARTING FULL SCRAPE (Discovery + Processing) <<<")
+        
+        # 1. Discover everything - crawl ALL pages until 404 or empty
+        new_discovered = self.crawl_only()  # No limit_pages parameter for full scrape
+        
+        # 2. Update stats and show pending queue size
         self.stats['discovered'] = self.d1.get_discovered_urls_count(source=self.source)
+        pending = self.d1.get_pending_count(source=self.source)
+        
+        logger.info(f"Discovery phase complete. Newly discovered: {new_discovered}")
+        logger.info(f"Total discovered URLs: {self.stats['discovered']}, Pending to process: {pending}")
+        
+        # 3. Process the queue
         return self.process_queue_mode(limit=limit)
 
 
