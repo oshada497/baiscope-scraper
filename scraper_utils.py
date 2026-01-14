@@ -180,14 +180,19 @@ class CloudflareD1:
             for sql in indexes:
                 self.execute(sql, log_error=False)
             
-            # Migration: Update existing 'baiscope' records to 'subz' 
-            # (Since this is now a dedicated Subz.lk repository)
+            # Migration: Clean database to only contain subz.lk URLs
+            # Delete all non-subz.lk URLs from old baiscope database
             migrations = [
-                "UPDATE telegram_files SET source = 'subz' WHERE source = 'baiscope'",
-                "UPDATE discovered_urls SET source = 'subz' WHERE source = 'baiscope'",
-                "UPDATE processed_urls SET source = 'subz' WHERE source = 'baiscope'",
-                "UPDATE scraper_state SET source = 'subz' WHERE source = 'baiscope'",
-                "UPDATE discovered_urls SET status = 'failed' WHERE url NOT LIKE '%subz.lk%'"
+                # Delete all non-subz.lk URLs from the database
+                "DELETE FROM discovered_urls WHERE url NOT LIKE '%subz.lk%'",
+                "DELETE FROM processed_urls WHERE url NOT LIKE '%subz.lk%'",
+                "DELETE FROM telegram_files WHERE source_url NOT LIKE '%subz.lk%' OR source_url IS NULL",
+                
+                # Ensure all remaining records have source='subz'
+                "UPDATE discovered_urls SET source = 'subz' WHERE source != 'subz'",
+                "UPDATE processed_urls SET source = 'subz' WHERE source != 'subz'",
+                "UPDATE telegram_files SET source = 'subz' WHERE source != 'subz'",
+                "UPDATE scraper_state SET source = 'subz' WHERE source != 'subz'"
             ]
             
             for sql in migrations:
