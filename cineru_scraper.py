@@ -27,8 +27,11 @@ class CineruScraper:
     def __init__(self):
         self.base_url = 'https://cineru.lk'
         
-        # Initialize session with chrome impersonation
-        self.session = requests.Session(impersonate="chrome120")
+        # Initialize session with chrome impersonation and SOCKS5 proxy
+        self.session = requests.Session(
+            impersonate="chrome120",
+            proxies={"http": "socks5://127.0.0.1:10808", "https": "socks5://127.0.0.1:10808"}
+        )
         
         # Load cookies if available
         cookies_json = os.getenv('CINERU_COOKIES', '{}')
