@@ -1,26 +1,54 @@
-# Deploying the Subz.lk Dedicated Scraper (v2)
+# Deploying Baiscope Scraper (Zoom.lk + Subz.lk) to Render
 
-The scraper has been completely rewritten for maximum stability, resume-capability, and performance on Render's Free Tier.
+This guide covers deploying the universal scraper to Render.com. The app now supports both `zoom.lk` and `subz.lk` in a single service without any V2Ray/VPN complexity.
 
-## 1. Environment Variables
-Ensure these are set in your Render dashboard:
-- `TELEGRAM_BOT_TOKEN`: Your BotFather token.
-- `TELEGRAM_CHAT_ID`: Your target chat ID.
-- `CF_ACCOUNT_ID`: Cloudflare Account ID.
-- `CF_API_TOKEN`: Cloudflare API Token (D1 Edit permissions).
-- `D1_DATABASE_ID`: The ID of your D1 database.
+## 1. Create Web Service
+1.  Go to **Render Dashboard** > **New +** > **Web Service**.
+2.  Connect your GitHub repository.
+3.  **Name**: `baiscope-scraper` (or any name you like).
+4.  **Region**: Any (e.g., Singapore, Frankfurt).
+5.  **Branch**: `main`.
+6.  **Runtime**: `Python 3`.
 
-## 2. Startup Command
-Set the **Start Command** to:
-```bash
-gunicorn app:app --config gunicorn.conf.py
-```
+## 2. Build & Start Commands
+*   **Build Command**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+*   **Start Command**:
+    ```bash
+    gunicorn app:app
+    ```
 
-## 3. How to Use
-- **Manual Check**: Hit `https://your-app.onrender.com/trigger` for a quick homepage check.
-- **Full History Scrape**: Hit `https://your-app.onrender.com/scrape/subz`.
-  - **Resume Support**: If Render restarts the app, just hit this URL again. The bot will check D1 and pick up exactly where it left off (e.g., Category: Movies, Page: 50).
-- **Status Monitoring**: Visit `https://your-app.onrender.com/status` to see current progress and database counts.
+## 3. Environment Variables
+Add the following variables under the **Environment** tab:
+
+| Variable | Value Description |
+| :--- | :--- |
+| `TELEGRAM_BOT_TOKEN` | Token from BotFather |
+| `TELEGRAM_CHAT_ID` | Channel ID (e.g., `-100xxxx`) |
+| `CF_ACCOUNT_ID` | Cloudflare Account ID |
+| `CF_API_TOKEN` | Cloudflare API Token (Must have D1 Edit permissions) |
+| `D1_DATABASE_ID` | Your D1 Database ID |
+| `PYTHON_VERSION` | `3.11.0` (Recommended) |
+
+## 4. How to Use
+Once deployed, use these URLs:
+
+### Status
+*   **Check Status**: `https://your-app.onrender.com/status`
+    *   Shows current job, running state, and database counts for both Zoom and Subz.
+
+### Zoom.lk
+*   **Deep Scrape (Full History)**: `https://your-app.onrender.com/scrape/zoom`
+    *   Starts crawling from Page 1 of Movies and TV Series.
+    *   Resumes automatically if interrupted (checks D1 state).
+*   **Quick Check (Monitoring)**: `https://your-app.onrender.com/trigger/zoom`
+    *   Checks only the first page for new items.
+
+### Subz.lk
+*   **Deep Scrape**: `https://your-app.onrender.com/scrape/subz`
+*   **Quick Check**: `https://your-app.onrender.com/trigger/subz`
 
 > [!TIP]
-> Use a service like **cron-job.org** to ping `/trigger` every 15 minutes to keep the service awake and check for new subtitles automatically.
+> Use **cron-job.org** to ping `/trigger/zoom` and `/trigger/subz` every 15-30 minutes to keep the service awake and fully automated.

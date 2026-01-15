@@ -27,7 +27,7 @@ class ZoomLkScraper:
                  cf_account_id=None, cf_api_token=None, d1_database_id=None):
         self.base_url = 'https://zoom.lk'
         self.source = "zoom"
-        self.num_workers = 3
+        self.num_workers = 10 # Increased for speed
         self.batch_size = 50
         self.lock = threading.Lock()
         
@@ -141,13 +141,19 @@ class ZoomLkScraper:
                 clean_links = list(set(clean_links))
                 
                 new_on_page = 0
+                new_items_batch = []
                 for link in clean_links:
                     if link not in self.processed_urls:
                         if self.d1.enabled:
-                            self.d1.add_discovered_url(link, category, page, source=self.source)
+                            # Add to batch list instead of individual calls
+                            new_items_batch.append((link, category, page))
                         new_on_page += 1
                         total_new += 1
                 
+                # Batch Insert
+                if self.d1.enabled and new_items_batch:
+                    self.d1.add_discovered_urls_batch(new_items_batch, source=self.source)
+
                 logger.info(f"Category {category} Page {page}: Found {len(clean_links)} links ({new_on_page} NEW)")
                 
                 self.tracker.total_found = self.d1.get_pending_count(source=self.source)
@@ -164,7 +170,7 @@ class ZoomLkScraper:
                     break
                     
                 page += 1
-                time.sleep(random.uniform(0.5, 1.0))
+                time.sleep(random.uniform(0.1, 0.3)) # Reduced sleep for speed
 
         logger.info(f"Discovery complete. Total new URLs found: {total_new}")
         self.tracker.stop()
