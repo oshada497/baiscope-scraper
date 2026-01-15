@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class CineruScraperCookies:
+class CineruScraper:
     def __init__(self):
         self.base_url = 'https://cineru.lk'
         
@@ -331,6 +331,7 @@ class CineruScraperCookies:
         logger.info("=== SCRAPING COMPLETE ===")
 
 if __name__ == "__main__":
-    scraper = CineruScraperCookies()
+    scraper = CineruScraper()
     scraper.initialize()
     scraper.scrape_all()
+
