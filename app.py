@@ -126,6 +126,7 @@ def full_scrape(source):
     if worker_thread and worker_thread.is_alive():
         return jsonify({'error': f'Job already running: {job_type}'}), 400
     
+    worker_thread = threading.Thread(target=run_job, args=("full_scrape", source), daemon=True)
     worker_thread.start()
     return jsonify({'message': f'Full historical scrape started for {source}'})
 
