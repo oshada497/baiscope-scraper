@@ -7,8 +7,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 class D1Database:
-    def __init__(self, account_id, api_token, database_id):
+    def __init__(self, account_id, api_token, database_id, table_prefix=''):
         self.enabled = bool(account_id and api_token and database_id)
+        self.table_prefix = table_prefix  # e.g., 'cineru_' or 'subz_'
+        
         if not self.enabled:
             logger.warning("D1 not configured - running without persistence")
             return
@@ -43,8 +45,10 @@ class D1Database:
             
     def create_tables(self):
         """Create database tables"""
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS subtitles (
+        table_name = f"{self.table_prefix}subtitles"
+        
+        self.execute(f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 url TEXT UNIQUE NOT NULL,
                 title TEXT,
@@ -56,38 +60,42 @@ class D1Database:
             )
         """)
         
-        self.execute("""
-            CREATE INDEX IF NOT EXISTS idx_normalized 
-            ON subtitles(normalized_filename)
+        self.execute(f"""
+            CREATE INDEX IF NOT EXISTS idx_{self.table_prefix}normalized 
+            ON {table_name}(normalized_filename)
         """)
         
-        logger.info("Database tables ready")
+        logger.info(f"Database table '{table_name}' ready")
         
     def get_processed_urls(self):
         """Get all processed URLs"""
-        result = self.execute("SELECT url FROM subtitles")
+        table_name = f"{self.table_prefix}subtitles"
+        result = self.execute(f"SELECT url FROM {table_name}")
         if result and len(result) > 0:
             return set(row.get('url') for row in result[0].get('results', []))
         return set()
         
     def get_processed_filenames(self):
         """Get all normalized filenames"""
-        result = self.execute("SELECT normalized_filename FROM subtitles WHERE normalized_filename IS NOT NULL")
+        table_name = f"{self.table_prefix}subtitles"
+        result = self.execute(f"SELECT normalized_filename FROM {table_name} WHERE normalized_filename IS NOT NULL")
         if result and len(result) > 0:
             return set(row.get('normalized_filename') for row in result[0].get('results', []))
         return set()
         
     def mark_processed(self, url, title):
         """Mark URL as processed (duplicate case)"""
+        table_name = f"{self.table_prefix}subtitles"
         self.execute(f"""
-            INSERT OR IGNORE INTO subtitles (url, title) 
+            INSERT OR IGNORE INTO {table_name} (url, title) 
             VALUES ('{url.replace("'", "''")}', '{title.replace("'", "''")[:200]}')
         """)
         
     def save_file(self, url, title, filename, normalized_filename, file_id, file_size):
         """Save uploaded file info"""
+        table_name = f"{self.table_prefix}subtitles"
         self.execute(f"""
-            INSERT OR REPLACE INTO subtitles 
+            INSERT OR REPLACE INTO {table_name} 
             (url, title, filename, normalized_filename, file_id, file_size)
             VALUES (
                 '{url.replace("'", "''")}',
