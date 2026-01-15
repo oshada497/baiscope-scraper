@@ -27,25 +27,24 @@ class CineruScraperCookies:
     def __init__(self):
         self.base_url = 'https://cineru.lk'
         
-        # Load cookies from environment variable
-        cookies_json = os.getenv('CINERU_COOKIES', '{}')
-        try:
-            self.cookies = json.loads(cookies_json)
-            logger.info(f"Loaded {len(self.cookies)} cookies")
-        except:
-            logger.warning("No cookies found - set CINERU_COOKIES env variable")
-            self.cookies = {}
-        
+        # Create session with realistic browser headers
         self.session = requests.Session()
-        self.session.cookies.update(self.cookies)
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br',
             'DNT': '1',
             'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
+            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"'
         })
         
         # Initialize components
@@ -284,13 +283,8 @@ class CineruScraperCookies:
             
     def scrape_all(self, worker_threads=2):
         """Main scraping function"""
-        logger.info("=== STARTING CINERU.LK SCRAPE (Cookie-Based) ===")
-        
-        if not self.cookies:
-            logger.error("No cookies provided! Set CINERU_COOKIES environment variable.")
-            return
-            
-        self.telegram.send_message("<b>Cineru.lk Scraper Started</b>\nUsing cookie authentication...")
+        logger.info("=== STARTING CINERU.LK SCRAPE (Header-Based) ===")
+        self.telegram.send_message("<b>Cineru.lk Scraper Started</b>\nUsing browser headers...")
         
         categories = self.find_categories()
         
