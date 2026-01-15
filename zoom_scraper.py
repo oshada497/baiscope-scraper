@@ -185,8 +185,12 @@ class ZoomLkScraper:
                 self.d1.add_processed_url(url, False, "404/Fail", source=self.source)
                 return False
             
-            soup = BeautifulSoup(res.text, 'html.parser')
-            title_node = soup.select_one('h1.entry-title')
+            # Explicitly decode as UTF-8 to handle Sinhala characters
+            html_content = res.content.decode('utf-8', errors='replace')
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Try new selector first (h1.tdb-title-text), fall back to old (h1.entry-title)
+            title_node = soup.select_one('h1.tdb-title-text') or soup.select_one('h1.entry-title')
             title = title_node.get_text(strip=True) if title_node else "Unknown"
             
             # 2. Find Download Button
@@ -265,7 +269,15 @@ class ZoomLkScraper:
             elif file_content[:4] == b'Rar!': ext = ".rar"
             else: ext = ".srt" # Default/Fallback
             
-            clean_title = re.sub(r'[^\w\s-]', '', title).strip()[:100]
+            # Sanitize title but keep Sinhala characters (Unicode aware)
+            # Remove purely illegal filename characters: \ / : * ? " < > |
+            clean_title = re.sub(r'[\\/*?:"<>|]', '', title).strip()
+            # If title is still too long or empty, handle it
+            clean_title = clean_title[:200]
+            if not clean_title or clean_title == "Unknown":
+                # Fallback: Use last part of URL if title failed
+                clean_title = url.rstrip('/').split('/')[-1] or f"subtitle_{int(time.time())}"
+                
             filename = f"{clean_title}{ext}"
             norm_name = normalize_filename(filename)
             
