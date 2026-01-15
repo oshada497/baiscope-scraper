@@ -218,8 +218,16 @@ class ZoomLkScraper:
             dl_res = self.get_page(dl_page_url)
             if not dl_res:
                 return False
-                
-            dl_soup = BeautifulSoup(dl_res.content, 'html.parser')
+
+            # Check if this is actually the file itself (Direct Download/Redirect)
+            content_type = dl_res.headers.get('Content-Type', '').lower()
+            if 'text/html' not in content_type:
+                # It's a file! Skip parsing
+                file_content = dl_res.content
+                final_dl_link = dl_res.url
+                logger.info(f"Direct download detected: {final_dl_link} ({content_type})")
+            else:
+                dl_soup = BeautifulSoup(dl_res.content, 'html.parser')
             
             # Find the FINAL download link on this page
             # Usually a button that says "Download" or similar, or maybe it's a direct file trigger
