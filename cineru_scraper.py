@@ -1,8 +1,8 @@
 """
-Cineru.lk Scraper using Manual Cookies for Cloudflare Bypass
-Simple and effective - no external services needed
+Cineru.lk Scraper - Robust Version
+Uses curl_cffi for real browser impersonation + Cookies support
 """
-import requests
+from curl_cffi import requests
 from bs4 import BeautifulSoup
 import os
 import time
@@ -27,24 +27,26 @@ class CineruScraper:
     def __init__(self):
         self.base_url = 'https://cineru.lk'
         
-        # Create session with realistic browser headers
-        self.session = requests.Session()
+        # Initialize session with chrome impersonation
+        self.session = requests.Session(impersonate="chrome120")
+        
+        # Load cookies if available
+        cookies_json = os.getenv('CINERU_COOKIES', '{}')
+        try:
+            self.cookies = json.loads(cookies_json)
+            if self.cookies:
+                self.session.cookies.update(self.cookies)
+                logger.info(f"Loaded {len(self.cookies)} cookies from environment")
+        except Exception as e:
+            logger.warning(f"Could not load cookies: {e}")
+            self.cookies = {}
+
+        # Standard headers
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
             'Cache-Control': 'max-age=0',
-            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"'
+            'Upgrade-Insecure-Requests': '1',
         })
         
         # Initialize components
@@ -74,27 +76,28 @@ class CineruScraper:
         logger.info(f"Cineru.lk Initialized: {len(self.processed_urls)} URLs, {len(self.processed_filenames)} files tracked")
         
     def fetch_page(self, url, retries=3):
-        """Fetch page using cookies"""
+        """Fetch page using curl_cffi with impersonation"""
         for attempt in range(retries):
             try:
+                # curl_cffi requests
                 response = self.session.get(url, timeout=30)
                 
                 if response.status_code == 200:
-                    # Check if we got Cloudflare challenge page
+                    # Check for Cloudflare challenge in content
                     if 'Checking your browser' in response.text or 'Just a moment' in response.text:
-                        logger.error("Cookies expired or invalid - got Cloudflare challenge")
+                        logger.error("Got Cloudflare challenge page - Cookies needed or expired!")
                         return None
                     return response
                 elif response.status_code == 403:
-                    logger.warning(f"403 Forbidden - cookies may be expired")
-                    return None
+                    logger.warning(f"403 Forbidden - Cloudflare blocked request (Attempt {attempt+1})")
                 elif response.status_code == 404:
                     return None
                     
             except Exception as e:
                 logger.warning(f"Fetch error (attempt {attempt + 1}): {e}")
-                if attempt < retries - 1:
-                    time.sleep(2 ** attempt)
+                
+            if attempt < retries - 1:
+                time.sleep(random.uniform(2, 5))
                     
         return None
         
@@ -123,12 +126,15 @@ class CineruScraper:
                 elif href.startswith('/'):
                     categories.append(f"{self.base_url}{href}")
                     
-        categories = list(set(categories))
+        # Filter and unique
+        categories = list(set([c for c in categories if 'cineru.lk' in c]))
         logger.info(f"Found {len(categories)} categories")
-        return categories if categories else [
-            f"{self.base_url}/category/movies",
-            f"{self.base_url}/category/tv-series"
-        ]
+        
+        # Fallback if discovery fails but page loaded
+        if not categories:
+             categories = [f"{self.base_url}/category/movies", f"{self.base_url}/category/tv-series"]
+             
+        return categories
         
     def crawl_category(self, category_url):
         """Crawl all pages in a category"""
@@ -136,6 +142,7 @@ class CineruScraper:
         page = 1
         
         while True:
+            # Construct URL
             if page == 1:
                 url = category_url
             else:
@@ -148,22 +155,23 @@ class CineruScraper:
             response = self.fetch_page(url)
             
             if not response:
-                logger.info(f"Category ended at page {page}")
+                logger.info(f"Category ended or blocked at page {page}")
                 break
                 
             soup = BeautifulSoup(response.text, 'html.parser')
             subtitle_links = []
             
-            # Look for subtitle links
+            # Look for subtitle links - finding a tags
             for link in soup.find_all('a', href=True):
                 href = link['href']
-                # Common patterns for subtitle detail pages
-                if any(pattern in href.lower() for pattern in ['subtitle', 'sinhala', '/sub/', '/movie/', '/tv/']):
-                    if href.startswith('http') and 'cineru.lk' in href:
-                        subtitle_links.append(href)
+                # Check for subtitle listing patterns
+                if '/subtitle/' in href or ('/sinhala-' in href and 'subtitle' in href):
+                    if href.startswith('http'):
+                        if 'cineru.lk' in href:
+                            subtitle_links.append(href)
                     elif href.startswith('/'):
                         subtitle_links.append(f"{self.base_url}{href}")
-                        
+            
             if not subtitle_links:
                 logger.info(f"No links found on page {page}")
                 break
@@ -176,12 +184,15 @@ class CineruScraper:
                     
             logger.info(f"Page {page}: Found {len(subtitle_links)} links ({new_count} new)")
             
-            if new_count == 0 and page > 1:
-                # All duplicates, likely end of new content
-                break
-                
+            # Stop if we see a page of all duplicates (optimization)
+            # But during first run or deep scraping, we might want to continue.
+            # Allowing continue for now, but break if 0 links found total
+            if new_count == 0 and page > 5: # Arbitrary depth check to stop deep crawls of old content
+                 logger.info("No new items for 5+ pages, stopping category")
+                 break
+
             page += 1
-            time.sleep(random.uniform(1, 3))
+            time.sleep(random.uniform(2, 4))
             
         return found_urls
         
@@ -204,21 +215,23 @@ class CineruScraper:
             soup = BeautifulSoup(response.text, 'html.parser')
             
             # Extract title
-            title_elem = soup.find('h1') or soup.find('h2', class_='entry-title')
+            title_elem = soup.find('h1', class_='entry-title') or soup.find('h1')
             title = title_elem.get_text(strip=True) if title_elem else "Unknown"
             title = title.replace('Sinhala Subtitle', '').replace('Sinhala Sub', '').strip()
             
             # Find download link
             download_link = None
+            # Need strict extraction logic here
             for link in soup.find_all('a', href=True):
-                text = link.get_text(strip=True).lower()
                 href = link['href']
-                if 'download' in text or 'download' in href.lower():
-                    download_link = href
-                    if not download_link.startswith('http'):
-                        download_link = f"{self.base_url}{download_link}"
-                    break
-                    
+                if 'download' in href.lower() or 'download' in link.get_text(strip=True).lower():
+                    # Helper link check
+                    if 'cineru.lk' in href or href.startswith('/'):
+                        download_link = href
+                        if not download_link.startswith('http'):
+                            download_link = f"{self.base_url}{download_link}"
+                        break
+            
             if not download_link:
                 logger.warning(f"No download link: {url}")
                 return False
@@ -231,17 +244,18 @@ class CineruScraper:
                 return False
                 
             content = file_response.content
-            if len(content) < 100:
-                logger.warning(f"File too small (likely error page): {url}")
-                return False
-                
+            # Check if it's an HTML error page usually small
+            if len(content) < 500 and b'html' in content.lower():
+                 logger.warning(f"Download returned HTML (likely error/block): {url}")
+                 return False
+
             # Determine file type
-            if content[:4] == b'PK\x03\x04':
+            if content.startswith(b'PK'):
                 ext = '.zip'
-            elif content[:4] == b'Rar!':
+            elif content.startswith(b'Rar!'):
                 ext = '.rar'
             else:
-                ext = '.srt'
+                ext = '.zip' # Default fallback
                 
             clean_title = re.sub(r'[^\w\s-]', '', title)[:100]
             filename = f"{clean_title}{ext}"
@@ -283,8 +297,13 @@ class CineruScraper:
             
     def scrape_all(self, worker_threads=2):
         """Main scraping function"""
-        logger.info("=== STARTING CINERU.LK SCRAPE (Header-Based) ===")
-        self.telegram.send_message("<b>Cineru.lk Scraper Started</b>\nUsing browser headers...")
+        logger.info("=== STARTING CINERU.LK SCRAPE (curl_cffi + Cookies) ===")
+        
+        if not self.cookies:
+            logger.warning("No cookies loaded. Relying on browser impersonation only.")
+            self.telegram.send_message("<b>Cineru.lk Scraper Started</b>\nUsing browser impersonation (No cookies)...")
+        else:
+            self.telegram.send_message("<b>Cineru.lk Scraper Started</b>\nUsing Cookies + Browser Impersonation...")
         
         categories = self.find_categories()
         
@@ -307,20 +326,25 @@ class CineruScraper:
         success_count = 0
         failed_count = 0
         
+        # Use ThreadPool
         with ThreadPoolExecutor(max_workers=worker_threads) as executor:
             futures = {executor.submit(self.process_subtitle, url): url for url in all_urls}
             
             for i, future in enumerate(as_completed(futures), 1):
-                result = future.result()
-                if result:
-                    success_count += 1
-                else:
-                    failed_count += 1
+                try:
+                    result = future.result()
+                    if result:
+                        success_count += 1
+                    else:
+                        failed_count += 1
+                except Exception as e:
+                     logger.error(f"Worker failed: {e}")
+                     failed_count += 1
                     
                 if i % 25 == 0:
                     logger.info(f"Progress: {i}/{len(all_urls)}")
                     
-                time.sleep(random.uniform(2, 4))
+                time.sleep(random.uniform(2, 5))
                 
         self.telegram.send_message(
             f"<b>Cineru.lk Complete!</b>\n"
@@ -334,4 +358,3 @@ if __name__ == "__main__":
     scraper = CineruScraper()
     scraper.initialize()
     scraper.scrape_all()
-
