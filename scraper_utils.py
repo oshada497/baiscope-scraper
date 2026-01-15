@@ -230,6 +230,35 @@ class CloudflareD1:
             "INSERT OR IGNORE INTO discovered_urls (url, category, page, source, status) VALUES (?, ?, ?, ?, 'pending')",
             [url, category, page, source]
         )
+
+    def add_discovered_urls_batch(self, items, source="subz"):
+        """
+        Batch insert multiple discovered URLs
+        items: list of (url, category, page) tuples
+        """
+        if not items:
+            return None
+            
+        # D1 API supports multiple statements, but let's build a single multi-value INSERT for atomicity
+        # However, D1 has a limit on bind variables. Let's do batches of 10.
+        results = []
+        batch_limit = 10
+        
+        for i in range(0, len(items), batch_limit):
+            batch = items[i:i+batch_limit]
+            placeholders = ",".join(["(?, ?, ?, ?, 'pending')"] * len(batch))
+            sql = f"INSERT OR IGNORE INTO discovered_urls (url, category, page, source, status) VALUES {placeholders}"
+            
+            # Flatten params: url1, cat1, page1, src, url2, cat2, page2, src...
+            params = []
+            for item in batch:
+                params.extend([item[0], item[1], item[2], source])
+                
+            res = self.execute(sql, params)
+            if res:
+                results.extend(res)
+                
+        return results
     
     def get_pending_urls(self, limit=10, source="subz"):
         """Get a list of pending URLs to process"""
