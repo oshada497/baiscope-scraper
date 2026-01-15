@@ -359,8 +359,10 @@ class TelegramUploader:
         self.min_delay = 1.0 
         self.rate_limit_delay = 2.0
         self.consecutive_429s = 0
+        self.lock = threading.Lock()
         
     def _wait_for_rate_limit(self):
+        # NOTE: This must be called inside the lock!
         elapsed = time.time() - self.last_request_time
         if elapsed < self.min_delay:
             time.sleep(self.min_delay - elapsed)
@@ -375,34 +377,40 @@ class TelegramUploader:
             return False
             
         for attempt in range(retries):
-            self._wait_for_rate_limit()
-            try:
-                url = f"{self.base_url}/sendMessage"
-                data = {
-                    'chat_id': self.chat_id,
-                    'text': message,
-                    'parse_mode': 'HTML'
-                }
-                response = requests.post(url, data=data, timeout=30)
-                self.last_request_time = time.time()
-                
-                if response.status_code == 429:
-                    retry_after = response.json().get('parameters', {}).get('retry_after', 30)
-                    self.consecutive_429s += 1
-                    logger.warning(f"Telegram rate limited! Retry after {retry_after}s (attempt {attempt + 1})")
-                    time.sleep(retry_after + 1)
-                    continue
+            # Acquire lock to ensure we don't spam requests in parallel
+            with self.lock:
+                self._wait_for_rate_limit()
+                try:
+                    url = f"{self.base_url}/sendMessage"
+                    data = {
+                        'chat_id': self.chat_id,
+                        'text': message,
+                        'parse_mode': 'HTML'
+                    }
+                    response = requests.post(url, data=data, timeout=30)
+                    self.last_request_time = time.time()
                     
-                if response.status_code == 200:
-                    self.consecutive_429s = max(0, self.consecutive_429s - 1)
-                    return True
+                    if response.status_code == 429:
+                        retry_after = response.json().get('parameters', {}).get('retry_after', 30)
+                        self.consecutive_429s += 1
+                        logger.warning(f"Telegram rate limited! Retry after {retry_after}s (attempt {attempt + 1})")
+                        # Sleep while holding lock to prevent others from hitting it
+                        time.sleep(retry_after + 1) 
+                        continue
+                        
+                    if response.status_code == 200:
+                        self.consecutive_429s = max(0, self.consecutive_429s - 1)
+                        return True
+                        
+                    logger.warning(f"Telegram message failed: {response.status_code} - {response.text}")
                     
-                logger.warning(f"Telegram message failed: {response.status_code} - {response.text}")
-                
-            except Exception as e:
-                logger.warning(f"Failed to send Telegram message: {e}")
-                if attempt < retries - 1:
-                    time.sleep(2 ** attempt)
+                except Exception as e:
+                    logger.warning(f"Failed to send Telegram message: {e}")
+                    # Release lock and sleep outside (but we held it for the request)
+            
+            # Sleep outside lock for generic network errors
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
                     
         return False
     
@@ -411,62 +419,61 @@ class TelegramUploader:
             return None
             
         for attempt in range(retries):
-            self._wait_for_rate_limit()
-            try:
-                url = f"{self.base_url}/sendDocument"
-                
-                mime_type = 'application/x-subrip'
-                if filename.lower().endswith('.zip'):
-                    mime_type = 'application/zip'
-                elif filename.lower().endswith('.rar'):
-                    mime_type = 'application/x-rar-compressed'
-                
-                files = {
-                    'document': (filename, io.BytesIO(file_content), mime_type)
-                }
-                data = {
-                    'chat_id': self.chat_id
-                }
-                if caption:
-                    data['caption'] = caption[:1024]
-                    data['parse_mode'] = 'HTML'
-                
-                response = requests.post(url, data=data, files=files, timeout=60)
-                self.last_request_time = time.time()
-                
-                if response.status_code == 429:
-                    retry_after = response.json().get('parameters', {}).get('retry_after', 30)
-                    self.consecutive_429s += 1
-                    logger.warning(f"Telegram rate limited on upload! Retry after {retry_after}s (attempt {attempt + 1})")
-                    time.sleep(retry_after + 2)
-                    continue
+            with self.lock:
+                self._wait_for_rate_limit()
+                try:
+                    url = f"{self.base_url}/sendDocument"
                     
-                if response.status_code == 200:
-                    self.consecutive_429s = max(0, self.consecutive_429s - 1)
-                    logger.info(f"Uploaded to Telegram: {filename}")
+                    mime_type = 'application/x-subrip'
+                    if filename.lower().endswith('.zip'):
+                        mime_type = 'application/zip'
+                    elif filename.lower().endswith('.rar'):
+                        mime_type = 'application/x-rar-compressed'
                     
-                    result = response.json().get('result', {})
-                    document = result.get('document', {})
-                    return {
-                        'file_id': document.get('file_id', ''),
-                        'file_unique_id': document.get('file_unique_id', ''),
-                        'file_size': document.get('file_size', 0),
-                        'message_id': result.get('message_id', 0),
-                        'filename': filename
+                    files = {
+                        'document': (filename, io.BytesIO(file_content), mime_type)
                     }
+                    data = {
+                        'chat_id': self.chat_id
+                    }
+                    if caption:
+                        data['caption'] = caption[:1024]
+                        data['parse_mode'] = 'HTML'
                     
-                logger.warning(f"Telegram upload failed: {response.status_code} - {response.text}")
-                if attempt < retries - 1:
-                    time.sleep(3 * (attempt + 1))
+                    response = requests.post(url, data=data, files=files, timeout=60)
+                    self.last_request_time = time.time()
                     
-            except requests.exceptions.Timeout:
-                logger.warning(f"Telegram upload timeout for {filename} (attempt {attempt + 1})")
-                if attempt < retries - 1:
-                    time.sleep(5 * (attempt + 1))
-            except Exception as e:
-                logger.error(f"Failed to upload to Telegram: {e}")
-                if attempt < retries - 1:
-                    time.sleep(2 ** attempt)
+                    if response.status_code == 429:
+                        retry_after = response.json().get('parameters', {}).get('retry_after', 30)
+                        self.consecutive_429s += 1
+                        logger.warning(f"Telegram rate limited on upload! Retry after {retry_after}s (attempt {attempt + 1})")
+                        time.sleep(retry_after + 2)
+                        continue
+                        
+                    if response.status_code == 200:
+                        self.consecutive_429s = max(0, self.consecutive_429s - 1)
+                        logger.info(f"Uploaded to Telegram: {filename}")
+                        
+                        result = response.json().get('result', {})
+                        document = result.get('document', {})
+                        return {
+                            'file_id': document.get('file_id', ''),
+                            'file_unique_id': document.get('file_unique_id', ''),
+                            'file_size': document.get('file_size', 0),
+                            'message_id': result.get('message_id', 0),
+                            'filename': filename
+                        }
+                        
+                    logger.warning(f"Telegram upload failed: {response.status_code} - {response.text}")
+                    
+                except requests.exceptions.Timeout:
+                    logger.warning(f"Telegram upload timeout for {filename} (attempt {attempt + 1})")
+                except Exception as e:
+                    logger.error(f"Failed to upload to Telegram: {e}")
+            
+            # Sleep outside lock for errors
+            if attempt < retries - 1:
+                time.sleep(3 * (attempt + 1))
                     
         return None
 
