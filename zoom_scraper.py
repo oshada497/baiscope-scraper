@@ -214,41 +214,42 @@ class ZoomLkScraper:
             
             # 3. Visit Download Page (if it's a redirect/intermediate page)
             # Zoom.lk often has an intermediate page like /sub-download/12345/
+            # 3. Visit Download Page / Download File
             logger.info(f"Visiting Download Page: {dl_page_url}")
             dl_res = self.get_page(dl_page_url)
             if not dl_res:
                 return False
 
-            # Check if this is actually the file itself (Direct Download/Redirect)
+            # Initialize variables
+            file_content = None
+            final_dl_link = None
+            dl_soup = None
+
+            # Check content type
             content_type = dl_res.headers.get('Content-Type', '').lower()
+            
             if 'text/html' not in content_type:
-                # It's a file! Skip parsing
+                # Direct download detected
                 file_content = dl_res.content
                 final_dl_link = dl_res.url
                 logger.info(f"Direct download detected: {final_dl_link} ({content_type})")
             else:
+                # Top-level page, parse to find link
                 dl_soup = BeautifulSoup(dl_res.content, 'html.parser')
-            
-            # Find the FINAL download link on this page
-            # Usually a button that says "Download" or similar, or maybe it's a direct file trigger
-            # Let's look for a link that ends in .zip, .rar, .srt or has 'download' in text
-            final_dl_link = None
-            
-            # Method A: Look for explicit file extensions
-            for a in dl_soup.find_all('a', href=True):
-                h = a['href'].lower()
-                if h.endswith('.zip') or h.endswith('.rar') or h.endswith('.srt'):
-                    final_dl_link = a['href']
-                    break
-            
-            # Method B: Look for 'Download' button if A failed (specific to Zoom templates)
-            if not final_dl_link:
-                 # Sometimes the intermediate page just redirects or has a button
-                 # Let's look for a button with 'download' text
-                 for a in dl_soup.find_all('a', href=True):
-                     if 'download' in a.get_text(strip=True).lower():
-                         final_dl_link = a['href']
-                         break
+                
+                # Method A: Look for explicit file extensions
+                for a in dl_soup.find_all('a', href=True):
+                    h = a['href'].lower()
+                    if h.endswith('.zip') or h.endswith('.rar') or h.endswith('.srt'):
+                        final_dl_link = a['href']
+                        break
+                
+                # Method B: Look for 'Download' button text
+                if not final_dl_link:
+                    for a in dl_soup.find_all('a', href=True):
+                        if 'download' in a.get_text(strip=True).lower():
+                            final_dl_link = a['href']
+                            break
             
             if not final_dl_link:
                 # Fallback: Maybe the dl_page_url WAS the file (if it was a redirect)? 
